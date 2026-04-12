@@ -9,11 +9,10 @@ from docketmind.ingestion.scheduler import _scheduler, add_case, remove_case
 
 @pytest.fixture(autouse=True)
 async def fresh_scheduler():
-    """Ensure scheduler is stopped and jobs are cleared between tests."""
+    """Ensure scheduler jobs are cleared between tests."""
     if _scheduler.running:
         _scheduler.shutdown(wait=False)
     _scheduler.remove_all_jobs()
-    _scheduler.start()
     yield
     if _scheduler.running:
         _scheduler.shutdown(wait=False)
