@@ -36,7 +36,9 @@ async def test_download_pdf_creates_parent_directories(tmp_path: Path):
 @respx.mock
 async def test_download_pdf_raises_on_http_error(tmp_path: Path):
     dest = tmp_path / "test.pdf"
-    respx.get(PDF_URL).mock(return_value=httpx.Response(403))
+    route = respx.get(PDF_URL).mock(return_value=httpx.Response(403))
 
     with pytest.raises(httpx.HTTPStatusError):
         await download_pdf(PDF_URL, dest)
+
+    assert route.call_count == 1
