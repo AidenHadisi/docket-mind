@@ -7,7 +7,7 @@ import httpx
 import stamina
 
 
-@stamina.retry(on=httpx.TransportError, attempts=5)
+@stamina.retry(on=httpx.TransportError, attempts=3)
 async def download_pdf(url: str, dest: Path) -> None:
     """Download a PDF from url and write it to dest.
 

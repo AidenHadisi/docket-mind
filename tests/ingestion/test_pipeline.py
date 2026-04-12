@@ -1,7 +1,7 @@
 """Tests for the case sync pipeline."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -63,73 +63,56 @@ def raw_entry_with_pdf() -> RawEntry:
     )
 
 
+@pytest.fixture
+def pipeline_mocks(mocker):
+    """Patch all external pipeline dependencies and return the mocks."""
+    return {
+        "fetch_feed": mocker.patch("docketmind.ingestion.pipeline.fetch_feed"),
+        "get_index": mocker.patch(
+            "docketmind.ingestion.pipeline.get_index", return_value=MagicMock()
+        ),
+        "upsert_entry": mocker.patch("docketmind.ingestion.pipeline.upsert_entry"),
+        "update_case_memory": mocker.patch(
+            "docketmind.ingestion.pipeline.update_case_memory", return_value="summary"
+        ),
+    }
+
+
 async def test_sync_case_returns_sync_result_for_unknown_case():
     result = await sync_case("nonexistent-id")
     assert isinstance(result, SyncResult)
     assert result.errors
 
 
-async def test_sync_case_inserts_new_entries(saved_case, raw_entry_no_pdf):
-    with (
-        patch(
-            "docketmind.ingestion.pipeline.fetch_feed", AsyncMock(return_value=[raw_entry_no_pdf])
-        ),
-        patch("docketmind.ingestion.pipeline.get_index", MagicMock(return_value=MagicMock())),
-        patch("docketmind.ingestion.pipeline.upsert_entry"),
-        patch(
-            "docketmind.ingestion.pipeline.update_case_memory", AsyncMock(return_value="summary")
-        ),
-    ):
-        result = await sync_case("case-001")
+async def test_sync_case_inserts_new_entries(saved_case, raw_entry_no_pdf, pipeline_mocks):
+    pipeline_mocks["fetch_feed"].return_value = [raw_entry_no_pdf]
+
+    result = await sync_case("case-001")
 
     assert result.new_entries == 1
     assert result.updated_entries == 0
 
 
-async def test_sync_case_detects_changed_entry(saved_case, raw_entry_no_pdf):
+async def test_sync_case_detects_changed_entry(saved_case, raw_entry_no_pdf, pipeline_mocks):
     # First sync: insert the entry
-    with (
-        patch(
-            "docketmind.ingestion.pipeline.fetch_feed", AsyncMock(return_value=[raw_entry_no_pdf])
-        ),
-        patch("docketmind.ingestion.pipeline.get_index", MagicMock(return_value=MagicMock())),
-        patch("docketmind.ingestion.pipeline.upsert_entry"),
-        patch(
-            "docketmind.ingestion.pipeline.update_case_memory", AsyncMock(return_value="summary")
-        ),
-    ):
-        await sync_case("case-001")
+    pipeline_mocks["fetch_feed"].return_value = [raw_entry_no_pdf]
+    await sync_case("case-001")
 
     # Second sync: same entry but different hash
     changed_entry = raw_entry_no_pdf.model_copy(update={"content_hash": "new-hash"})
-    with (
-        patch("docketmind.ingestion.pipeline.fetch_feed", AsyncMock(return_value=[changed_entry])),
-        patch("docketmind.ingestion.pipeline.get_index", MagicMock(return_value=MagicMock())),
-        patch("docketmind.ingestion.pipeline.upsert_entry"),
-        patch(
-            "docketmind.ingestion.pipeline.update_case_memory", AsyncMock(return_value="summary")
-        ),
-    ):
-        result = await sync_case("case-001")
+    pipeline_mocks["fetch_feed"].return_value = [changed_entry]
+    result = await sync_case("case-001")
 
     assert result.updated_entries == 1
     assert result.new_entries == 0
 
 
-async def test_sync_case_is_idempotent(saved_case, raw_entry_no_pdf):
+async def test_sync_case_is_idempotent(saved_case, raw_entry_no_pdf, pipeline_mocks):
     """Running sync twice with unchanged entries produces zero new/updated on second run."""
-    patches = {
-        "fetch": AsyncMock(return_value=[raw_entry_no_pdf]),
-        "index": MagicMock(return_value=MagicMock()),
-    }
-    with (
-        patch("docketmind.ingestion.pipeline.fetch_feed", patches["fetch"]),
-        patch("docketmind.ingestion.pipeline.get_index", patches["index"]),
-        patch("docketmind.ingestion.pipeline.upsert_entry"),
-        patch("docketmind.ingestion.pipeline.update_case_memory", AsyncMock(return_value="s")),
-    ):
-        await sync_case("case-001")
-        result = await sync_case("case-001")
+    pipeline_mocks["fetch_feed"].return_value = [raw_entry_no_pdf]
+
+    await sync_case("case-001")
+    result = await sync_case("case-001")
 
     assert result.new_entries == 0
     assert result.updated_entries == 0

@@ -10,6 +10,14 @@ pytest.importorskip("llama_index.readers.file", reason="llama-index-readers-file
 from docketmind.ingestion.indexer import get_index, upsert_document, upsert_entry
 from docketmind.models import DocketEntry, DocketEntryDocument
 
+_MINIMAL_PDF = (
+    b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+    b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+    b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n"
+    b"xref\n0 4\n0000000000 65535 f \n"
+    b"trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
+)
+
 
 @pytest.fixture
 def tmp_index_path(tmp_path: Path, monkeypatch):
@@ -34,6 +42,24 @@ def sample_entry() -> DocketEntry:
     )
 
 
+@pytest.fixture
+def sample_document() -> DocketEntryDocument:
+    return DocketEntryDocument(
+        id="doc-001",
+        docket_entry_id="entry-001",
+        pdf_url="https://storage.courtlistener.com/recap/doc.pdf",
+        downloaded=True,
+    )
+
+
+@pytest.fixture
+def pdf_path(tmp_path: Path) -> Path:
+    """Write a minimal valid PDF and return its path."""
+    path = tmp_path / "test.pdf"
+    path.write_bytes(_MINIMAL_PDF)
+    return path
+
+
 def test_get_index_creates_index_directory(tmp_index_path: Path):
     get_index()
     assert tmp_index_path.exists()
@@ -48,55 +74,28 @@ def test_upsert_entry_is_idempotent(tmp_index_path: Path, sample_entry: DocketEn
     index = get_index()
     upsert_entry(index, sample_entry)
     upsert_entry(index, sample_entry)
-    # Reload from disk to verify no duplicates were persisted
+
     fresh_index = get_index()
     doc_count = len(fresh_index.docstore.docs)
     assert doc_count == 1, f"Expected 1 doc after idempotent upsert, got {doc_count}"
 
 
-@pytest.fixture
-def sample_document() -> DocketEntryDocument:
-    """A minimal DocketEntryDocument for use in indexer tests."""
-    return DocketEntryDocument(
-        id="doc-001",
-        docket_entry_id="entry-001",
-        pdf_url="https://storage.courtlistener.com/recap/doc.pdf",
-        downloaded=True,
-    )
-
-
-_MINIMAL_PDF = (
-    b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
-    b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
-    b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n"
-    b"xref\n0 4\n0000000000 65535 f \n"
-    b"trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
-)
-
-
 def test_upsert_document_indexes_without_error(
-    tmp_index_path: Path, sample_document: DocketEntryDocument, tmp_path: Path
+    tmp_index_path: Path, sample_document: DocketEntryDocument, pdf_path: Path
 ):
     """upsert_document should not raise when given a valid PDF path."""
-    pdf_path = tmp_path / "test.pdf"
-    pdf_path.write_bytes(_MINIMAL_PDF)
-
     index = get_index()
     upsert_document(index, sample_document, pdf_path)  # should not raise
 
 
 def test_upsert_document_is_idempotent(
-    tmp_index_path: Path, sample_document: DocketEntryDocument, tmp_path: Path
+    tmp_index_path: Path, sample_document: DocketEntryDocument, pdf_path: Path
 ):
     """Calling upsert_document twice with the same doc must not duplicate pages."""
-    pdf_path = tmp_path / "test.pdf"
-    pdf_path.write_bytes(_MINIMAL_PDF)
-
     index = get_index()
     upsert_document(index, sample_document, pdf_path)
     upsert_document(index, sample_document, pdf_path)
 
     fresh_index = get_index()
-    # Each page gets one doc keyed <doc_id>_page_<n>; idempotent means exactly 1 after 2 calls
     doc_count = len(fresh_index.docstore.docs)
     assert doc_count == 1, f"Expected 1 doc after idempotent upsert, got {doc_count}"
