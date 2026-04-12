@@ -95,3 +95,32 @@ async def test_fetch_feed_raises_on_http_error():
 
     with pytest.raises(httpx.HTTPStatusError):
         await fetch_feed("https://www.courtlistener.com/docket/12345/feed/")
+
+
+RSS_NO_PUBDATE = """\
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>United States v. Doe</title>
+    <item>
+      <title>Notice of Filing</title>
+      <guid isPermaLink="false">https://www.courtlistener.com/docket/99999/recaps/001</guid>
+      <description>&lt;p&gt;Attorney files notice.&lt;/p&gt;</description>
+    </item>
+  </channel>
+</rss>
+"""
+
+
+@respx.mock
+async def test_fetch_feed_falls_back_when_pubdate_missing():
+    """fetch_feed should return a valid RawEntry with a tz-aware date when pubDate is absent."""
+    respx.get("https://www.courtlistener.com/docket/99999/feed/").mock(
+        return_value=httpx.Response(200, text=RSS_NO_PUBDATE)
+    )
+
+    entries = await fetch_feed("https://www.courtlistener.com/docket/99999/feed/")
+
+    assert len(entries) == 1
+    assert entries[0].date_filed is not None
+    assert entries[0].date_filed.tzinfo is not None  # must be timezone-aware

@@ -3,8 +3,11 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+import docketmind.db as db_module
 from docketmind.ingestion.scheduler import _scheduler, add_case, remove_case
+from docketmind.models import Base, Case
 
 
 @pytest.fixture(autouse=True)
@@ -46,3 +49,38 @@ async def test_remove_case_removes_job():
 
 async def test_remove_case_is_safe_when_job_does_not_exist():
     remove_case("nonexistent-case")  # must not raise
+
+
+@pytest.fixture
+async def in_memory_db():
+    """Wire up an in-memory SQLite DB for each scheduler test."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    original_session = db_module.async_session
+    db_module.async_session = async_sessionmaker(engine, expire_on_commit=False)
+    yield engine
+    db_module.async_session = original_session
+    await engine.dispose()
+
+
+async def test_start_registers_jobs_for_all_cases(in_memory_db):
+    """start() should register one interval job per case in the DB."""
+    from docketmind.ingestion.scheduler import start
+
+    # Insert two cases
+    async with db_module.async_session() as session:
+        for i in range(2):
+            case = Case(
+                id=f"case-{i:03d}",
+                court_listener_id=f"cl-{i}",
+                name=f"Case {i}",
+                court="D. Mass.",
+            )
+            session.add(case)
+        await session.commit()
+
+    await start()
+
+    assert _scheduler.get_job("sync_case-000") is not None
+    assert _scheduler.get_job("sync_case-001") is not None
