@@ -63,7 +63,7 @@ def test_docket_entry_id_is_uuid_at_construction():
     assert UUID_RE.match(entry.id), f"Expected UUID, got: {entry.id}"
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 async def setup_db():
     """Create tables in a fresh in-memory DB for each test."""
     test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -76,7 +76,7 @@ async def setup_db():
     await test_engine.dispose()
 
 
-async def test_case_can_be_saved_and_retrieved():
+async def test_case_can_be_saved_and_retrieved(setup_db):
     """A Case instance can be persisted and read back from the DB."""
     async with db_module.async_session() as session:
         case = Case(
