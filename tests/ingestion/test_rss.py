@@ -72,13 +72,19 @@ async def test_fetch_feed_strips_html_from_content():
 
 @respx.mock
 async def test_fetch_feed_computes_content_hash():
+    import hashlib
+
     respx.get("https://www.courtlistener.com/docket/12345/feed/").mock(
         return_value=httpx.Response(200, text=RSS_FIXTURE)
     )
 
     entries = await fetch_feed("https://www.courtlistener.com/docket/12345/feed/")
 
-    assert len(entries[0].content_hash) == 64  # sha256 hex digest
+    expected_content = "Court grants defendant's motion to dismiss."
+    expected_hash = hashlib.sha256(
+        f"Order GRANTING Motion to Dismiss\n{expected_content}".encode()
+    ).hexdigest()
+    assert entries[0].content_hash == expected_hash
 
 
 @respx.mock

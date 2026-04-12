@@ -6,13 +6,14 @@ from datetime import UTC, datetime
 
 import feedparser
 import httpx
-from pydantic import BaseModel
+from loguru import logger
+from pydantic import BaseModel, Field
 
 
 class RawEntry(BaseModel):
     """A single docket entry parsed from a CourtListener RSS feed."""
 
-    court_listener_id: str
+    court_listener_id: str = Field(min_length=1)
     title: str
     content: str
     content_hash: str
@@ -69,6 +70,10 @@ async def fetch_feed(rss_url: str) -> list[RawEntry]:
             t: tuple[int, ...] = tuple(int(v) for v in raw_t)  # type: ignore[arg-type]
             date_filed = datetime(t[0], t[1], t[2], t[3], t[4], t[5], tzinfo=UTC)
         else:
+            logger.warning(
+                f"RSS entry missing pubDate, using current time: "
+                f"court_listener_id={item.get('id') or item.get('link', '')!r}"
+            )
             date_filed = datetime.now(UTC)
 
         court_listener_id: str = str(item.get("id") or item.get("link", ""))
