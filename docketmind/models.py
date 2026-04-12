@@ -6,7 +6,17 @@ Imported by both ingestion and intelligence packages — neither depends on the 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, event, func, inspect, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+    event,
+    func,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -27,8 +37,11 @@ def _apply_column_defaults(target: Base, args: tuple, kwargs: dict) -> None:
     for col_attr in mapper.column_attrs:
         col = col_attr.columns[0]
         attr_name = col_attr.key
-        if attr_name not in kwargs and col.default is not None and col.default.is_scalar:
-            kwargs[attr_name] = col.default.arg
+        if attr_name not in kwargs and col.default is not None:
+            if col.default.is_scalar:
+                kwargs[attr_name] = col.default.arg
+            elif col.default.is_callable:
+                kwargs[attr_name] = col.default.arg(None)
 
 
 class Case(Base):
@@ -60,6 +73,9 @@ class DocketEntry(Base):
     """A single entry in a federal court docket."""
 
     __tablename__ = "docket_entries"
+    __table_args__ = (
+        UniqueConstraint("case_id", "court_listener_id", name="uq_docket_entry_case_cl_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     case_id: Mapped[str] = mapped_column(
@@ -108,3 +124,6 @@ class DocketEntryDocument(Base):
     )
 
     entry: Mapped["DocketEntry"] = relationship("DocketEntry", back_populates="documents")
+
+
+__all__ = ["Base", "Case", "DocketEntry", "DocketEntryDocument"]
