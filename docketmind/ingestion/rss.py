@@ -1,7 +1,6 @@
 """CourtListener RSS feed fetcher and parser."""
 
 import hashlib
-import re
 from datetime import UTC, datetime
 
 import feedparser
@@ -21,30 +20,29 @@ class RawEntry(BaseModel):
     pdf_urls: list[str]
 
 
-def _strip_html(html: str) -> str:
-    """Remove HTML tags from a string and collapse whitespace."""
-    text = re.sub(r"<[^>]+>", "", html)
-    return re.sub(r"\s+", " ", text).strip()
-
-
 def _compute_hash(title: str, content: str) -> str:
     """Compute a SHA-256 hash of title + content for change detection."""
     return hashlib.sha256(f"{title}\n{content}".encode()).hexdigest()
 
 
 def _extract_pdf_urls(entry: feedparser.FeedParserDict) -> list[str]:
-    """Extract CourtListener .pdf URLs from RSS entry enclosures and links."""
+    """Extract CourtListener storage PDF URLs from entry enclosures and links.
+
+    CourtListener Atom feeds set type="None" on all enclosures, so MIME type
+    is not a reliable signal. Instead, URLs are matched by host and extension.
+    The enclosure loop handles RSS 2.0; the links loop handles Atom (where
+    enclosures appear as <link rel="enclosure">).
+    """
     urls: list[str] = []
 
     for enclosure in getattr(entry, "enclosures", []):
         url = enclosure.get("url", "")
-        mime = enclosure.get("type", "")
-        if mime == "application/pdf" and "courtlistener" in url:
+        if "storage.courtlistener.com" in url and url.endswith(".pdf"):
             urls.append(url)
 
     for link in getattr(entry, "links", []):
         url = link.get("href", "")
-        if url.endswith(".pdf") and "courtlistener" in url and url not in urls:
+        if "storage.courtlistener.com" in url and url.endswith(".pdf") and url not in urls:
             urls.append(url)
 
     return urls
@@ -63,7 +61,7 @@ async def fetch_feed(rss_url: str) -> list[RawEntry]:
 
     entries: list[RawEntry] = []
     for item in feed.entries:
-        content = _strip_html(getattr(item, "summary", "") or "")
+        content = getattr(item, "summary", "") or ""
 
         if item.get("published_parsed"):
             raw_t: tuple[object, ...] = tuple(item.published_parsed)

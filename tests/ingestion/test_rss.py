@@ -10,78 +10,86 @@ from docketmind.ingestion.rss import RawEntry, fetch_feed
 
 FEED_URL = "https://www.courtlistener.com/docket/12345/feed/"
 
-RSS_FIXTURE = """\
+# Real CourtListener feeds are Atom, not RSS 2.0. Enclosures use
+# <link rel="enclosure" type="None"> — MIME type is never "application/pdf".
+ATOM_FIXTURE = """\
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0">
-  <channel>
-    <title>United States v. Doe</title>
-    <item>
-      <title>Order GRANTING Motion to Dismiss</title>
-      <guid isPermaLink="false">https://www.courtlistener.com/docket/12345/recaps/001</guid>
-      <pubDate>Mon, 07 Apr 2026 12:00:00 +0000</pubDate>
-      <description>&lt;p&gt;Court grants defendant&#39;s motion to dismiss.&lt;/p&gt;</description>
-      <enclosure
-        url="https://storage.courtlistener.com/recap/gov.uscourts.test.001.pdf"
-        type="application/pdf"
-        length="10000"/>
-    </item>
-    <item>
-      <title>Notice of Appearance</title>
-      <guid isPermaLink="false">https://www.courtlistener.com/docket/12345/recaps/002</guid>
-      <pubDate>Tue, 08 Apr 2026 09:00:00 +0000</pubDate>
-      <description>&lt;p&gt;Attorney files notice of appearance.&lt;/p&gt;</description>
-    </item>
-  </channel>
-</rss>
+<feed xml:lang="en-us" xmlns="http://www.w3.org/2005/Atom">
+  <title>United States v. Doe</title>
+  <link href="https://www.courtlistener.com/" rel="alternate"/>
+  <link href="https://www.courtlistener.com/docket/12345/feed/" rel="self"/>
+  <id>https://www.courtlistener.com/</id>
+  <entry>
+    <title>Order GRANTING Motion to Dismiss</title>
+    <link
+      href="https://www.courtlistener.com/docket/12345/doe-v-doe/?order_by=desc#entry-1"
+      rel="alternate"/>
+    <published>2026-04-07T00:00:00-07:00</published>
+    <id>https://www.courtlistener.com/docket/12345/doe-v-doe/?order_by=desc#entry-1</id>
+    <summary type="html">Court grants defendant's motion to dismiss.</summary>
+    <link
+      href="https://storage.courtlistener.com/recap/gov.uscourts.test.001.pdf"
+      length="0" rel="enclosure" type="None"/>
+  </entry>
+  <entry>
+    <title>Notice of Appearance</title>
+    <link
+      href="https://www.courtlistener.com/docket/12345/doe-v-doe/?order_by=desc#entry-2"
+      rel="alternate"/>
+    <published>2026-04-08T00:00:00-07:00</published>
+    <id>https://www.courtlistener.com/docket/12345/doe-v-doe/?order_by=desc#entry-2</id>
+    <summary type="html">Attorney files notice of appearance.</summary>
+  </entry>
+</feed>
 """
 
-
-RSS_FIXTURE_MISSING_PUB_DATE = """\
+# Atom entry with no <published> element — feedparser returns None for published_parsed.
+ATOM_FIXTURE_MISSING_PUBLISHED = """\
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0">
-  <channel>
-    <title>United States v. Doe</title>
-    <item>
-      <title>Minute Entry</title>
-      <guid isPermaLink="false">https://www.courtlistener.com/docket/12345/recaps/003</guid>
-      <description>&lt;p&gt;No pubDate present.&lt;/p&gt;</description>
-    </item>
-  </channel>
-</rss>
+<feed xml:lang="en-us" xmlns="http://www.w3.org/2005/Atom">
+  <title>United States v. Doe</title>
+  <entry>
+    <title>Minute Entry</title>
+    <link
+      href="https://www.courtlistener.com/docket/12345/doe-v-doe/?order_by=desc#minute-entry-001"
+      rel="alternate"/>
+    <id>https://www.courtlistener.com/docket/12345/doe-v-doe/?order_by=desc#minute-entry-001</id>
+    <summary type="html">No published date present.</summary>
+  </entry>
+</feed>
 """
 
-
-RSS_FIXTURE_MIXED_ENCLOSURES = """\
+# One valid storage.courtlistener.com PDF, one ECF link (wrong host),
+# one storage.courtlistener.com non-PDF — all with type="None" as in production.
+ATOM_FIXTURE_MIXED_ENCLOSURES = """\
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0">
-  <channel>
-    <title>United States v. Doe</title>
-    <item>
-      <title>Attachment Review</title>
-      <guid isPermaLink="false">https://www.courtlistener.com/docket/12345/recaps/004</guid>
-      <pubDate>Tue, 08 Apr 2026 09:00:00 +0000</pubDate>
-      <description>&lt;p&gt;Entry with mixed enclosures.&lt;/p&gt;</description>
-      <enclosure
-        url="https://storage.courtlistener.com/recap/gov.uscourts.test.valid.pdf"
-        type="application/pdf"
-        length="10000"/>
-      <enclosure
-        url="https://example.com/external.pdf"
-        type="application/pdf"
-        length="9999"/>
-      <enclosure
-        url="https://storage.courtlistener.com/recap/not-a-pdf.txt"
-        type="text/plain"
-        length="500"/>
-    </item>
-  </channel>
-</rss>
+<feed xml:lang="en-us" xmlns="http://www.w3.org/2005/Atom">
+  <title>United States v. Doe</title>
+  <entry>
+    <title>Attachment Review</title>
+    <link
+      href="https://www.courtlistener.com/docket/12345/doe-v-doe/?order_by=desc#entry-4"
+      rel="alternate"/>
+    <published>2026-04-08T00:00:00-07:00</published>
+    <id>https://www.courtlistener.com/docket/12345/doe-v-doe/?order_by=desc#entry-4</id>
+    <summary type="html">Entry with mixed enclosures.</summary>
+    <link
+      href="https://storage.courtlistener.com/recap/gov.uscourts.test.valid.pdf"
+      length="0" rel="enclosure" type="None"/>
+    <link
+      href="https://ecf.mad.uscourts.gov/doc1/095013569421?caseid=293693"
+      length="0" rel="enclosure" type="None"/>
+    <link
+      href="https://storage.courtlistener.com/recap/not-a-pdf.txt"
+      length="0" rel="enclosure" type="None"/>
+  </entry>
+</feed>
 """
 
 
 @pytest.fixture
 def mock_feed(respx_mock):
-    def _mock_feed(*, text: str = RSS_FIXTURE, status_code: int = 200):
+    def _mock_feed(*, text: str = ATOM_FIXTURE, status_code: int = 200):
         return respx_mock.get(FEED_URL).mock(return_value=httpx.Response(status_code, text=text))
 
     return _mock_feed
@@ -104,9 +112,8 @@ async def test_fetch_feed_returns_parsed_entries(mock_feed):
             ["https://storage.courtlistener.com/recap/gov.uscourts.test.001.pdf"],
         ),
         (1, "pdf_urls", []),
-        (0, "content", "Court grants defendant's motion to dismiss."),
     ],
-    ids=["first-entry-pdf-urls", "second-entry-empty-pdf-urls", "html-stripped-content"],
+    ids=["first-entry-pdf-urls", "second-entry-empty-pdf-urls"],
 )
 async def test_fetch_feed_extracts_expected_fields(
     mock_feed, entry_index: int, field_name: str, expected
@@ -136,8 +143,8 @@ async def test_fetch_feed_raises_on_http_error(mock_feed):
         await fetch_feed(FEED_URL)
 
 
-async def test_fetch_feed_uses_current_time_when_pub_date_missing(mock_feed):
-    mock_feed(text=RSS_FIXTURE_MISSING_PUB_DATE)
+async def test_fetch_feed_uses_current_time_when_published_missing(mock_feed):
+    mock_feed(text=ATOM_FIXTURE_MISSING_PUBLISHED)
     before = datetime.now(UTC)
     entries = await fetch_feed(FEED_URL)
     after = datetime.now(UTC)
@@ -147,8 +154,8 @@ async def test_fetch_feed_uses_current_time_when_pub_date_missing(mock_feed):
     assert before <= entries[0].date_filed <= after
 
 
-async def test_fetch_feed_filters_non_courtlistener_or_non_pdf_enclosures(mock_feed):
-    mock_feed(text=RSS_FIXTURE_MIXED_ENCLOSURES)
+async def test_fetch_feed_filters_non_storage_and_non_pdf_enclosures(mock_feed):
+    mock_feed(text=ATOM_FIXTURE_MIXED_ENCLOSURES)
     entries = await fetch_feed(FEED_URL)
 
     assert entries[0].pdf_urls == [
