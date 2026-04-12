@@ -1,6 +1,5 @@
 """LlamaIndex vector store: index creation, document upsert."""
 
-import contextlib
 from pathlib import Path
 from typing import cast
 
@@ -71,8 +70,7 @@ def upsert_entry(index: VectorStoreIndex, entry: DocketEntry) -> None:
             "type": "docket_entry",
         },
     )
-    with contextlib.suppress(Exception):
-        index.delete_ref_doc(str(entry.id), delete_from_docstore=True)
+    index.delete_ref_doc(str(entry.id), delete_from_docstore=True)
     index.insert(doc)
     _save(index)
 
@@ -108,8 +106,7 @@ def upsert_document(
                 "type": "pdf_document",
             }
         )
-        with contextlib.suppress(Exception):
-            index.delete_ref_doc(doc_id, delete_from_docstore=True)
+        index.delete_ref_doc(doc_id, delete_from_docstore=True)
         index.insert(page)
 
     _save(index)

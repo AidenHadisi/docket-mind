@@ -45,4 +45,8 @@ def test_upsert_entry_indexes_without_error(tmp_index_path: Path, sample_entry: 
 def test_upsert_entry_is_idempotent(tmp_index_path: Path, sample_entry: DocketEntry):
     index = get_index()
     upsert_entry(index, sample_entry)
-    upsert_entry(index, sample_entry)  # second upsert must not raise or duplicate
+    upsert_entry(index, sample_entry)
+    # Reload from disk to verify no duplicates were persisted
+    fresh_index = get_index()
+    doc_count = len(fresh_index.docstore.docs)
+    assert doc_count == 1, f"Expected 1 doc after idempotent upsert, got {doc_count}"
