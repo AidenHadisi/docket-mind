@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import docketmind.db as db_module
-from docketmind.db import async_session
 from docketmind.models import Base, Case, DocketEntry, DocketEntryDocument
 
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -79,7 +78,7 @@ async def setup_db():
 
 async def test_case_can_be_saved_and_retrieved():
     """A Case instance can be persisted and read back from the DB."""
-    async with async_session() as session:
+    async with db_module.async_session() as session:
         case = Case(
             court_listener_id="99999",
             name="Test v. Case",
@@ -88,7 +87,7 @@ async def test_case_can_be_saved_and_retrieved():
         session.add(case)
         await session.commit()
 
-    async with async_session() as session:
+    async with db_module.async_session() as session:
         result = await session.execute(select(Case).where(Case.court_listener_id == "99999"))
         saved = result.scalar_one()
         assert saved.name == "Test v. Case"
