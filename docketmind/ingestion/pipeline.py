@@ -1,10 +1,11 @@
 """Case sync pipeline: reconcile docket entries, download PDFs, embed, update memory."""
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 import docketmind.db as db_module
@@ -25,7 +26,7 @@ class SyncResult(BaseModel):
     new_documents: int = 0
     downloaded_documents: int = 0
     memory_updated: bool = False
-    errors: list[str] = []
+    errors: list[str] = Field(default_factory=list)
 
 
 async def sync_case(case_id: str) -> SyncResult:
@@ -137,7 +138,7 @@ async def sync_case(case_id: str) -> SyncResult:
         )
         for entry in unembedded_entries.scalars():
             try:
-                upsert_entry(index, entry)
+                await asyncio.to_thread(upsert_entry, index, entry)
                 entry.embedded = True
             except Exception as exc:
                 result.errors.append(f"Embed failed for entry {entry.id}: {exc}")
@@ -154,7 +155,7 @@ async def sync_case(case_id: str) -> SyncResult:
         for doc in unembedded_docs.scalars():
             if doc.pdf_path:
                 try:
-                    upsert_document(index, doc, Path(doc.pdf_path))
+                    await asyncio.to_thread(upsert_document, index, doc, Path(doc.pdf_path))
                     doc.embedded = True
                 except Exception as exc:
                     result.errors.append(f"Embed failed for doc {doc.id}: {exc}")
@@ -163,7 +164,7 @@ async def sync_case(case_id: str) -> SyncResult:
         await session.commit()
 
         # Step 6: Update memory if anything changed
-        if changed_entries:
+        if changed_entries or result.downloaded_documents > 0:
             try:
                 new_memory = await update_case_memory(case, changed_entries)
                 case.memory_text = new_memory
