@@ -9,6 +9,7 @@ dependencies = [
     "llama-index-core>=0.12",
     "llama-index-llms-openai>=0.3",
     "llama-index-embeddings-openai>=0.3",
+    "llama-index-readers-file>=0.4",
     "sqlalchemy[asyncio]>=2.0",
     "alembic>=1.13",
     "aiosqlite>=0.20",

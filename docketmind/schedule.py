@@ -46,9 +46,15 @@ async def start() -> None:
 
 
 async def add_case(case_id: str) -> None:
-    """Register a polling job for a new case and trigger an immediate backfill."""
+    """Register a polling job for a new case and trigger an immediate backfill.
+
+    The backfill runs as a background task so the caller (e.g. a slash
+    command handler) can return a response immediately.
+    """
+    import asyncio
+
     _register_job(case_id)
-    await _run_sync(case_id)
+    asyncio.create_task(_run_sync(case_id), name=f"backfill-{case_id}")
     logger.info("Added case {} to scheduler and triggered backfill", case_id)
 
 

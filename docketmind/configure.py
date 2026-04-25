@@ -33,7 +33,7 @@ class Config(BaseConfig):
     # Embeddings
     embed_provider: Literal["openai", "mock"] = "openai"
     embed_model: str = "text-embedding-3-small"
-    embed_api_key: str = ""
+    embed_api_key: str
     embed_extra: dict[str, Any] = {}
 
     # Storage — all persistent state lives under data_dir
