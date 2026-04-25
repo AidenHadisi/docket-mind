@@ -1,0 +1,86 @@
+---
+description: Commenting and documentation standards for Python source and test files
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Commenting Standards
+
+## Docstrings
+
+Every module, class, function, method, and fixture must have a docstring — including inner closures, decorators, and nested callbacks. One-liners are fine when the signature is self-explanatory.
+
+```python
+# BAD — missing docstring on inner function
+def cooldown(seconds: float) -> Callable:
+    def decorator(fn):
+        @functools.wraps(fn)
+        async def wrapper(event):
+            ...
+        return wrapper
+    return decorator
+
+# GOOD — every layer documented
+def cooldown(seconds: float) -> Callable:
+    """Enforce a per-user cooldown on a command handler."""
+    def decorator(fn):
+        """Wrap fn with cooldown enforcement, preserving its signature."""
+        @functools.wraps(fn)
+        async def wrapper(event):
+            """Check the cooldown window and delegate to the original handler."""
+            ...
+        return wrapper
+    return decorator
+```
+
+## Inline Comments
+
+Inline comments explain **why** or **what trade-off** — never narrate what the code already says. If the code is clear on its own, no comment is needed.
+
+```python
+# BAD — restates the code
+# Loop through entries
+for entry in entries:
+    ...
+
+# BAD — obvious from context
+# Check if case_id is None
+if case_id is None:
+
+# GOOD — explains a non-obvious reason
+# Flush to assign entry.id so we can link child documents below
+await session.flush()
+
+# GOOD — explains a trade-off or constraint
+# Delete-then-insert: LlamaIndex has no atomic replace, so purge stale nodes first
+index.delete_ref_doc(doc_id, delete_from_docstore=True)
+```
+
+## Section Separators
+
+Never use `# -------` or `# =======` banner comments to label code sections. The code structure and docstrings provide organization. Remove them when you encounter them.
+
+```python
+# BAD
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+class MyError(Exception): ...
+
+# GOOD — the class docstring provides all needed context
+class MyError(Exception):
+    """Raised when a command requires a higher permission level."""
+```
+
+## Loguru
+
+Use `{}` placeholder syntax, not f-strings, for all loguru calls.
+
+```python
+# BAD
+logger.error(f"Sync failed for case {case_id}: {exc}")
+
+# GOOD — lazy evaluation, structured-logging friendly
+logger.error("Sync failed for case {}: {}", case_id, exc)
+```

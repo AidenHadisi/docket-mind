@@ -7,8 +7,8 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from docketmind.config import settings
-from docketmind.models import Base
+from docketmind.configure import settings
+from docketmind.store import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{settings.db_path}")

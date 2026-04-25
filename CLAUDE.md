@@ -19,7 +19,7 @@ uv run python -m docketmind
 uv run pytest
 
 # Run a single test file
-uv run pytest tests/ingestion/test_rss.py
+uv run pytest tests/ingest/test_rss.py
 
 # Run a single test by name
 uv run pytest -k "test_parse_entry"
@@ -38,15 +38,34 @@ uv run alembic revision --autogenerate -m "description"  # generate new migratio
 
 ## Architecture
 
-Three internal packages, strictly layered — bot depends on intelligence and ingestion, they do not depend on bot:
+Four internal packages, strictly layered:
 
-**`docketmind/ingestion/`** — everything that brings data in: CourtListener RSS polling (APScheduler + feedparser + httpx), PDF downloading (httpx + aiofiles), LlamaIndex document loading, chunking, embedding (OpenAI `text-embedding-3-small`), LlamaIndex SimpleVectorStore indexing (disk-persisted), and per-case memory updates. All retries use stamina.
+**`docketmind/rag/`** — shared vector store infrastructure. `__init__.py` configures `LlamaConfig.embed_model` on import. `index.py` owns the `index` singleton and all upsert operations. `query.py` will own retrieval. Both `ingest/` and `intelligence/` depend on this package; it depends on neither.
 
-**`docketmind/intelligence/`** — everything that answers questions: LlamaIndex RAG query engine over ChromaDB, per-case memory retrieval, OpenAI LLM calls via LlamaIndex, citation formatting.
+**`docketmind/intelligence/`** — everything that answers questions and synthesises text with the LLM. `__init__.py` configures `LlamaConfig.llm` on import. `memory.py` generates per-case summaries. Future: query engine, citation formatting. Depends on `rag/`.
+
+**`docketmind/ingest/`** — everything that brings data in: CourtListener RSS polling (APScheduler + feedparser + httpx), PDF downloading (httpx + aiofiles), and the sync pipeline that calls into `rag/` and `intelligence/`. All retries use stamina.
 
 **`docketmind/bot/`** — platform adapters only. `base.py` defines the abstract interface all platforms must implement. `discord/` is the only active adapter. Future platforms (Slack, Telegram) add a new subdirectory implementing the same interface without touching ingestion or intelligence.
 
-**`docketmind/config.py`** — single pydantic-settings `Settings` class, loaded from `.env`. All other modules import settings from here, never from `os.environ` directly.
+**`docketmind/config.py`** — single pydantic-settings `Config` class, loaded from `.env`. All other modules import settings from here, never from `os.environ` directly.
+
+## Package Initialisation Pattern
+
+Shared resources (LlamaIndex globals, singletons) are initialised in the package `__init__.py` and take effect on first import. Never use a `get_x()` factory or `@functools.cache` wrapper — just assign at module level:
+
+```python
+# rag/__init__.py — embed model is a RAG concern
+LlamaConfig.embed_model = _build_embed_model()
+
+# intelligence/__init__.py — LLM is an intelligence concern
+LlamaConfig.llm = _build_llm()
+
+# rag/index.py — singleton, not a factory function
+index: VectorStoreIndex = _load_or_create()
+```
+
+When a module needs a resource owned by another package, import that package so its `__init__.py` runs. Do not use side-effect-only imports with `# noqa`; instead, move the code to the package that naturally owns it.
 
 ## Data Layout
 

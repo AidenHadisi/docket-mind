@@ -33,6 +33,7 @@ dev = [
     "pytest-mock>=3.14",
     "factory-boy>=3.3",
     "pre-commit>=4.0",
+    "pytest-env>=1.1",
 ]
 
 [tool.ruff]
@@ -54,6 +55,12 @@ venv = ".venv"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+env = [
+    "DISCORD_BOT_TOKEN=test-discord-token",
+    "LLM_API_KEY=test-llm-key",
+    "LLM_PROVIDER=mock",
+    "EMBED_PROVIDER=mock",
+]
 
 [tool.coverage.run]
 source = ["docketmind"]

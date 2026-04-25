@@ -891,7 +891,7 @@ from pathlib import Path
 
 from llama_index.core import (
     Document,
-    Settings as LlamaSettings,
+    Settings as LlamaConfig,
     StorageContext,
     VectorStoreIndex,
     load_index_from_storage,
@@ -905,7 +905,7 @@ from docketmind.models import DocketEntry, DocketEntryDocument
 
 def _configure_llama() -> None:
     """Set the OpenAI embedding model on the LlamaIndex global settings."""
-    LlamaSettings.embed_model = OpenAIEmbedding(
+    LlamaConfig.embed_model = OpenAIEmbedding(
         model=settings.openai_embedding_model,
         api_key=settings.openai_api_key,
     )
