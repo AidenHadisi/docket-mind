@@ -1,6 +1,5 @@
-"""RAG query engine and chat engine for answering questions about cases."""
+"""RAG query engine for answering questions about cases."""
 
-from llama_index.core.chat_engine.types import BaseChatEngine, ChatMode
 from llama_index.core.vector_stores.types import MetadataFilter, MetadataFilters
 from pydantic import BaseModel
 
@@ -51,18 +50,3 @@ async def query(question: str, case_id: str | None = None) -> QueryResult:
     ]
 
     return QueryResult(answer=str(response), sources=sources)
-
-
-def build_chat_engine(case_id: str) -> BaseChatEngine:
-    """Build a stateful chat engine scoped to a single case.
-
-    Uses condense_plus_context mode: conversation history is condensed into a
-    standalone query each turn, then fresh context is retrieved from the index.
-    The returned engine holds its own ChatMemoryBuffer — callers should keep one
-    instance per conversation (e.g. per Discord channel) and reuse it across turns.
-    """
-    filters = MetadataFilters(filters=[MetadataFilter(key="case_id", value=case_id)])
-    return index.as_chat_engine(
-        chat_mode=ChatMode.CONDENSE_PLUS_CONTEXT,
-        filters=filters,
-    )

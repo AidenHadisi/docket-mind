@@ -1,95 +1,28 @@
-"""Bot core: command registry, decorators, and the Bot orchestrator."""
+"""Bot core: the Bot orchestrator that routes platform events to command handlers."""
+
+from __future__ import annotations
 
 import asyncio
-import functools
-from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from docketmind.platforms import BotResponse, PermissionLevel, Platform, PlatformEvent
+from docketmind.commands import CooldownError, PermissionDeniedError
+from docketmind.platforms import BotResponse, Platform, PlatformEvent
 
-
-class PermissionDeniedError(Exception):
-    """Raised when a command requires a higher permission level than the caller has."""
-
-
-class CooldownError(Exception):
-    """Raised when a command is invoked before its cooldown expires."""
-
-    def __init__(self, retry_after: float) -> None:
-        """Initialise with the number of seconds remaining on the cooldown."""
-        self.retry_after = retry_after
-        super().__init__(f"Command on cooldown. Retry after {retry_after:.1f}s.")
-
-
-CommandHandler = Callable[[PlatformEvent], Awaitable[BotResponse]]
-
-# Module-level cooldown state: key → expiry monotonic timestamp
-# Maps "handler_name:user_or_channel_id" → monotonic expiry timestamp.
-# Uses event-loop time (not wall-clock) so cooldowns are immune to NTP jumps.
-_cooldown_state: dict[str, float] = {}
-
-
-def cooldown(seconds: float, per: str = "user") -> Callable[[CommandHandler], CommandHandler]:
-    """Enforce a per-user or per-channel cooldown on a command handler.
-
-    per="user"    — keyed by (command_name, user_id)
-    per="channel" — keyed by (command_name, channel_id)
-
-    Raises CooldownError if the handler is called within the cooldown window.
-    State is stored in a module-level dict; no external store is needed.
-    """
-
-    def decorator(fn: CommandHandler) -> CommandHandler:
-        """Wrap fn with cooldown enforcement, preserving its signature."""
-
-        @functools.wraps(fn)
-        async def wrapper(event: PlatformEvent) -> BotResponse:
-            """Check the cooldown window and delegate to the original handler."""
-            key_part = event.user_id if per == "user" else event.channel_id
-            key = f"{fn.__name__}:{key_part}"
-            now = asyncio.get_running_loop().time()
-            expiry = _cooldown_state.get(key, 0.0)
-            if now < expiry:
-                raise CooldownError(retry_after=expiry - now)
-            _cooldown_state[key] = now + seconds
-            return await fn(event)
-
-        return wrapper
-
-    return decorator
-
-
-def requires_permission(level: PermissionLevel) -> Callable[[CommandHandler], CommandHandler]:
-    """Raise PermissionDeniedError if the event's permission level is below level."""
-
-    def decorator(fn: CommandHandler) -> CommandHandler:
-        """Wrap fn with permission enforcement, preserving its signature."""
-
-        @functools.wraps(fn)
-        async def wrapper(event: PlatformEvent) -> BotResponse:
-            """Check permission level and delegate to the original handler."""
-            if event.permission_level < level:
-                raise PermissionDeniedError(
-                    f"Command '{fn.__name__}' requires {level.name} permission."
-                )
-            return await fn(event)
-
-        return wrapper
-
-    return decorator
+if TYPE_CHECKING:
+    from docketmind.commands import CommandHandler, CommandSpec
 
 
 class Bot:
     """Central orchestrator: registers platforms, routes events to command handlers.
 
     Usage:
+        from docketmind.commands import get_specs
+
         bot = Bot()
-
-        @bot.platform
-        class MyPlatform(Platform): ...
-
-        bot.command("ask")(commands.ask)
+        bot.register_commands(get_specs())
+        bot.register_platform(discord_platform)
         await bot.run()
     """
 
@@ -98,31 +31,14 @@ class Bot:
         self._platforms: list[Platform] = []
         self._handlers: dict[str, CommandHandler] = {}
 
-    def platform(self, cls: type[Platform]) -> type[Platform]:
-        """Class decorator: instantiate and register a Platform subclass.
-
-        The class is constructed with no arguments; platforms that need config
-        read from docketmind.config.settings directly.
-        """
-        self._platforms.append(cls())
-        return cls
-
     def register_platform(self, instance: Platform) -> None:
         """Register an already-constructed Platform instance."""
         self._platforms.append(instance)
 
-    def command(self, name: str) -> Callable[[CommandHandler], CommandHandler]:
-        """Register a coroutine function as the handler for the named command.
-
-        The handler receives a PlatformEvent and must return a BotResponse.
-        """
-
-        def decorator(fn: CommandHandler) -> CommandHandler:
-            """Store fn as the handler for the command name from the enclosing scope."""
-            self._handlers[name] = fn
-            return fn
-
-        return decorator
+    def register_commands(self, specs: list[CommandSpec]) -> None:
+        """Bulk-register command handlers from a list of CommandSpec definitions."""
+        for spec in specs:
+            self._handlers[spec.name] = spec.handler
 
     async def dispatch(self, event: PlatformEvent, platform: Platform) -> None:
         """Look up and invoke the handler for event.command; send result back.

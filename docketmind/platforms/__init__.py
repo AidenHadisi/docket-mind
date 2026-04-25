@@ -4,14 +4,19 @@ Import a specific platform adapter to register it with the Bot:
     from docketmind.platforms.discord import DiscordPlatform
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from enum import IntEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from docketmind.chat import SourceChunk
+
+if TYPE_CHECKING:
+    from docketmind.commands import CommandSpec
 
 
 class PermissionLevel(IntEnum):
@@ -22,7 +27,7 @@ class PermissionLevel(IntEnum):
     """
 
     USER = 0
-    ADMIN = 10
+    ADMIN = 1
 
 
 class PlatformEvent(BaseModel):
@@ -36,7 +41,7 @@ class PlatformEvent(BaseModel):
     channel_id: str  # opaque string; platform-specific (e.g. "guild_id:channel_id")
     user_id: str
     permission_level: PermissionLevel
-    raw: Any = None  # platform-native object (e.g. discord.Interaction); None in tests
+    raw: Any = Field(default=None, exclude=True)
 
 
 class BotResponse(BaseModel):
@@ -84,3 +89,10 @@ class Platform(ABC):
     async def disconnect(self) -> None:
         """Gracefully close the platform connection."""
         ...
+
+    def register_commands(self, specs: list[CommandSpec]) -> None:  # noqa: B027
+        """Build platform-native command registrations from CommandSpec metadata.
+
+        Override in adapters that need to translate specs into native UI
+        elements (e.g. Discord slash commands). The default is a no-op.
+        """

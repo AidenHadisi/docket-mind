@@ -1,13 +1,18 @@
 """Discord platform adapter using discord.py 2.x slash commands."""
 
 import asyncio
+import inspect
+import textwrap
+from collections import deque
 from collections.abc import AsyncIterator
+from typing import Any
 
 import discord
 from discord import app_commands
 from discord.ext import commands as ext_commands
 from loguru import logger
 
+from docketmind.commands import CommandSpec
 from docketmind.configure import settings
 from docketmind.platforms import BotResponse, PermissionLevel, Platform, PlatformEvent
 
@@ -20,29 +25,32 @@ _ANSWER_MAX_LENGTH = 1800
 def _format_response(response: BotResponse) -> str:
     """Render a BotResponse as a Discord message string.
 
-    Truncates the answer text to _ANSWER_MAX_LENGTH and appends up to 5
-    source citations. The combined output never exceeds _DISCORD_MAX_LENGTH.
+    Truncates the answer text at word boundaries to _ANSWER_MAX_LENGTH and
+    appends up to 5 source citations. The combined output never exceeds
+    _DISCORD_MAX_LENGTH.
     """
-    text = response.text[:_ANSWER_MAX_LENGTH]
+    text = textwrap.shorten(response.text, width=_ANSWER_MAX_LENGTH, placeholder="...")
     if response.citations:
-        citation_lines: list[str] = []
-        for i, src in enumerate(response.citations[:5], start=1):
-            date = src.date_filed or "unknown date"
-            url = src.pdf_url or ""
-            citation_lines.append(f"[{i}] {date} — {url}" if url else f"[{i}] {date}")
+        citation_lines = [
+            f"[{i}] {src.date_filed or 'unknown date'} — {src.pdf_url}"
+            if src.pdf_url
+            else f"[{i}] {src.date_filed or 'unknown date'}"
+            for i, src in enumerate(response.citations[:5], start=1)
+        ]
         text += "\n\n**Sources:**\n" + "\n".join(citation_lines)
-    return text[:_DISCORD_MAX_LENGTH]
+    return textwrap.shorten(text, width=_DISCORD_MAX_LENGTH, placeholder="...")
 
 
 class DiscordPlatform(Platform):
     """Maps discord.py slash command interactions to PlatformEvent/BotResponse.
 
-    Slash commands are registered on a specific guild (settings.discord_guild_id)
-    for instant propagation during development, or globally when the setting is None.
+    Slash commands are built automatically from CommandSpec metadata via
+    register_commands(). Each spec becomes a single slash command whose
+    parameters, descriptions, and defer behaviour are derived from the spec.
 
     Permission mapping:
-        interaction.user.guild_permissions.administrator → PermissionLevel.ADMIN
-        all others                                        → PermissionLevel.USER
+        interaction.user.guild_permissions.administrator -> PermissionLevel.ADMIN
+        all others                                        -> PermissionLevel.USER
 
     channel_id encoding:
         f"{interaction.guild_id}:{interaction.channel_id}"
@@ -64,10 +72,8 @@ class DiscordPlatform(Platform):
         )
         self._tree: app_commands.CommandTree = self._client.tree
         self._event_queue: asyncio.Queue[PlatformEvent] = asyncio.Queue()
-        # Stash the Interaction so send() can reply via followup after dispatch completes
-        self._pending: dict[str, discord.Interaction] = {}
+        self._pending: dict[str, deque[discord.Interaction]] = {}
         self._ready = asyncio.Event()
-        self._register_commands()
         self._register_events()
 
     def _channel_id(self, interaction: discord.Interaction) -> str:
@@ -99,93 +105,69 @@ class DiscordPlatform(Platform):
                 logger.info("Discord adapter ready (global sync)")
             self._ready.set()
 
-    def _register_commands(self) -> None:
-        """Attach slash command callbacks to the CommandTree."""
+    # ------------------------------------------------------------------
+    # CommandSpec -> slash command auto-wiring
+    # ------------------------------------------------------------------
 
-        @self._tree.command(name="ask", description="Ask a question about a tracked case")
-        @app_commands.describe(
-            question="The question to ask",
-            case_id="Optional: scope the question to a specific case ID",
+    def register_commands(self, specs: list[CommandSpec]) -> None:
+        """Build a Discord slash command for each CommandSpec and add it to the tree."""
+        for spec in specs:
+            self._add_slash_command(spec)
+
+    def _add_slash_command(self, spec: CommandSpec) -> None:
+        """Translate a single CommandSpec into an app_commands.Command on the tree."""
+
+        async def callback(interaction: discord.Interaction, **kwargs: Any) -> None:
+            await interaction.response.defer(ephemeral=spec.ephemeral_defer)
+            ch = self._channel_id(interaction)
+            self._pending.setdefault(ch, deque()).append(interaction)
+            await self._event_queue.put(
+                PlatformEvent(
+                    command=spec.name,
+                    args=kwargs,
+                    channel_id=ch,
+                    user_id=str(interaction.user.id),
+                    permission_level=self._permission_level(interaction),
+                    raw=interaction,
+                )
+            )
+
+        sig_params = [
+            inspect.Parameter(
+                "interaction",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=discord.Interaction,
+            ),
+        ]
+        descriptions: dict[str, str] = {}
+        for p in spec.params:
+            annotation = p.type if p.required else (p.type | None)
+            default = inspect.Parameter.empty if p.required else None
+            sig_params.append(
+                inspect.Parameter(
+                    p.name,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=annotation,
+                    default=default,
+                )
+            )
+            descriptions[p.name] = p.description
+
+        callback.__signature__ = inspect.Signature(sig_params)  # type: ignore[attr-defined]
+        if descriptions:
+            callback = app_commands.describe(**descriptions)(callback)
+
+        self._tree.add_command(
+            app_commands.Command(
+                name=spec.name,
+                description=spec.description,
+                callback=callback,
+            )
         )
-        async def _ask(
-            interaction: discord.Interaction,
-            question: str,
-            case_id: str | None = None,
-        ) -> None:
-            """Defer the response and enqueue an ask event for Bot.dispatch."""
-            # Defer immediately to avoid Discord's 3-second ack timeout
-            await interaction.response.defer()
-            channel_id = self._channel_id(interaction)
-            self._pending[channel_id] = interaction
-            await self._event_queue.put(
-                PlatformEvent(
-                    command="ask",
-                    args={"question": question, "case_id": case_id},
-                    channel_id=channel_id,
-                    user_id=str(interaction.user.id),
-                    permission_level=self._permission_level(interaction),
-                    raw=interaction,
-                )
-            )
 
-        @self._tree.command(name="add_case", description="Start tracking a CourtListener case")
-        @app_commands.describe(court_listener_id="CourtListener docket ID (numeric)")
-        async def _add_case(
-            interaction: discord.Interaction,
-            court_listener_id: str,
-        ) -> None:
-            """Defer the response and enqueue an add_case event for Bot.dispatch."""
-            await interaction.response.defer(ephemeral=True)
-            channel_id = self._channel_id(interaction)
-            self._pending[channel_id] = interaction
-            await self._event_queue.put(
-                PlatformEvent(
-                    command="add_case",
-                    args={"court_listener_id": court_listener_id},
-                    channel_id=channel_id,
-                    user_id=str(interaction.user.id),
-                    permission_level=self._permission_level(interaction),
-                    raw=interaction,
-                )
-            )
-
-        @self._tree.command(name="remove_case", description="Stop tracking a CourtListener case")
-        @app_commands.describe(court_listener_id="CourtListener docket ID to remove")
-        async def _remove_case(
-            interaction: discord.Interaction,
-            court_listener_id: str,
-        ) -> None:
-            """Defer the response and enqueue a remove_case event for Bot.dispatch."""
-            await interaction.response.defer(ephemeral=True)
-            channel_id = self._channel_id(interaction)
-            self._pending[channel_id] = interaction
-            await self._event_queue.put(
-                PlatformEvent(
-                    command="remove_case",
-                    args={"court_listener_id": court_listener_id},
-                    channel_id=channel_id,
-                    user_id=str(interaction.user.id),
-                    permission_level=self._permission_level(interaction),
-                    raw=interaction,
-                )
-            )
-
-        @self._tree.command(name="list_cases", description="List all currently tracked cases")
-        async def _list_cases(interaction: discord.Interaction) -> None:
-            """Defer the response and enqueue a list_cases event for Bot.dispatch."""
-            await interaction.response.defer()
-            channel_id = self._channel_id(interaction)
-            self._pending[channel_id] = interaction
-            await self._event_queue.put(
-                PlatformEvent(
-                    command="list_cases",
-                    args={},
-                    channel_id=channel_id,
-                    user_id=str(interaction.user.id),
-                    permission_level=self._permission_level(interaction),
-                    raw=interaction,
-                )
-            )
+    # ------------------------------------------------------------------
+    # Platform interface
+    # ------------------------------------------------------------------
 
     async def events(self) -> AsyncIterator[PlatformEvent]:  # type: ignore[override]
         """Yield events from the internal queue as Discord interactions arrive.
@@ -200,12 +182,15 @@ class DiscordPlatform(Platform):
     async def send(self, channel_id: str, response: BotResponse) -> None:
         """Send a BotResponse as a Discord followup message.
 
-        Pops the stored interaction for channel_id and calls followup.send().
-        No-ops if the interaction is no longer available (e.g. already answered).
+        Pops the oldest stored interaction for channel_id (FIFO) and calls
+        followup.send(). No-ops if no interaction is available.
         """
-        interaction = self._pending.pop(channel_id, None)
-        if interaction is None:
+        q = self._pending.get(channel_id)
+        if not q:
             return
+        interaction = q.popleft()
+        if not q:
+            del self._pending[channel_id]
         content = _format_response(response)
         await interaction.followup.send(content=content, ephemeral=response.ephemeral)
 

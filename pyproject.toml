@@ -20,6 +20,7 @@ dependencies = [
     "apscheduler>=3.10",
     "stamina>=24.2",
     "loguru>=0.7",
+    "cachetools>=5.3",
 ]
 
 [dependency-groups]

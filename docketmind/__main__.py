@@ -10,8 +10,8 @@ Run with:
 import asyncio
 
 import docketmind  # noqa: F401 — configures LlamaIndex globals before anything else
-from docketmind import commands
 from docketmind.bot import Bot
+from docketmind.commands import get_specs
 from docketmind.platforms.discord import DiscordPlatform
 from docketmind.schedule import start as ingest_start
 
@@ -19,20 +19,16 @@ from docketmind.schedule import start as ingest_start
 async def main() -> None:
     """Bootstrap DocketMind: wire commands, start ingest scheduler, run bot."""
     bot = Bot()
+    specs = get_specs()
 
-    # Register the Discord platform adapter
-    bot.register_platform(DiscordPlatform())
+    platform = DiscordPlatform()
+    platform.register_commands(specs)
+    bot.register_platform(platform)
 
-    # Register all command handlers
-    bot.command("ask")(commands.ask)
-    bot.command("add_case")(commands.add_case)
-    bot.command("remove_case")(commands.remove_case)
-    bot.command("list_cases")(commands.list_cases)
+    bot.register_commands(specs)
 
-    # Start ingest scheduler (registers APScheduler jobs for all existing cases)
     await ingest_start()
 
-    # Run bot — blocks until shutdown (KeyboardInterrupt or unhandled error)
     await bot.run()
 
 
