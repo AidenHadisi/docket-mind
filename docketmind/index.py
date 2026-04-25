@@ -77,7 +77,30 @@ async def upsert_entry(entry: DocketEntry) -> None:
     _save()
 
 
-async def upsert_document(doc_model: DocketEntryDocument, pdf_path: Path) -> None:
+def delete_case_vectors(case_id: str) -> None:
+    """Remove all vector nodes belonging to a case from the index.
+
+    Iterates the docstore and deletes any ref-doc whose metadata
+    contains a matching case_id.
+    """
+    docstore = index.storage_context.docstore
+    all_ref_docs = docstore.get_all_ref_doc_info()
+    ref_ids_to_delete = [
+        ref_id
+        for ref_id, doc_info in (all_ref_docs or {}).items()
+        if doc_info.metadata.get("case_id") == case_id
+    ]
+    for ref_id in ref_ids_to_delete:
+        index.delete_ref_doc(ref_id, delete_from_docstore=True)
+    if ref_ids_to_delete:
+        _save()
+
+
+async def upsert_document(
+    doc_model: DocketEntryDocument,
+    pdf_path: Path,
+    date_filed: str = "",
+) -> None:
     """Index all pages of a PDF document into the vector store.
 
     Each page is run through the ingestion pipeline and keyed by
@@ -97,6 +120,7 @@ async def upsert_document(doc_model: DocketEntryDocument, pdf_path: Path) -> Non
             {
                 "docket_entry_id": str(doc_model.docket_entry_id),
                 "pdf_url": doc_model.pdf_url,
+                "date_filed": date_filed,
                 "type": "pdf_document",
             }
         )

@@ -27,8 +27,12 @@ async def test_add_case_registers_interval_job(mocker):
 
 
 async def test_add_case_triggers_immediate_sync(mocker):
+    """Backfill is fired as a background task; yield control so it runs."""
+    import asyncio
+
     run_sync = mocker.patch("docketmind.schedule._run_sync")
     await add_case("case-001")
+    await asyncio.sleep(0)
 
     run_sync.assert_awaited_once_with("case-001")
 
@@ -50,9 +54,7 @@ async def test_start_registers_jobs_for_all_cases(in_memory_db, mocker):
     """start() should register one interval job per case in the DB."""
     from docketmind.schedule import start
 
-    cases = [
-        Case(court_listener_id=f"cl-{i}", name=f"Case {i}", court="D. Mass.") for i in range(2)
-    ]
+    cases = [Case(court_listener_id=f"cl-{i}", name=f"Case {i}") for i in range(2)]
     async with db_module.async_session() as session:
         session.add_all(cases)
         await session.commit()

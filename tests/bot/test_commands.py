@@ -37,7 +37,6 @@ async def _insert_case(court_listener_id: str = "12345") -> Case:
         case = Case(
             court_listener_id=court_listener_id,
             name="Smith v. Jones",
-            court="D. Mass.",
         )
         session.add(case)
         await session.commit()

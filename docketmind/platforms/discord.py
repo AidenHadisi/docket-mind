@@ -22,22 +22,43 @@ _DISCORD_MAX_LENGTH = 2000
 _ANSWER_MAX_LENGTH = 1800
 
 
-def _format_response(response: BotResponse) -> str:
-    """Render a BotResponse as a Discord message string.
+def _readable_date(iso: str | None) -> str:
+    """Convert an ISO date string to a short human-readable form, or empty string."""
+    if not iso:
+        return ""
+    try:
+        from datetime import datetime
 
-    Truncates the answer text at word boundaries to _ANSWER_MAX_LENGTH and
-    appends up to 5 source citations. The combined output never exceeds
-    _DISCORD_MAX_LENGTH.
+        dt = datetime.fromisoformat(iso)
+        return dt.strftime("%b %-d, %Y")
+    except (ValueError, TypeError):
+        return iso
+
+
+def _format_response(response: BotResponse) -> str:
+    """Render a BotResponse as a Discord message using markdown formatting.
+
+    The answer is displayed in a blockquote. Up to 5 source citations are
+    appended as a numbered list with masked links and human-readable dates.
+    The combined output never exceeds _DISCORD_MAX_LENGTH.
     """
-    text = textwrap.shorten(response.text, width=_ANSWER_MAX_LENGTH, placeholder="...")
+    answer = textwrap.shorten(response.text, width=_ANSWER_MAX_LENGTH, placeholder="...")
+    text = "\n".join(f"> {line}" for line in answer.splitlines())
+
     if response.citations:
-        citation_lines = [
-            f"[{i}] {src.date_filed or 'unknown date'} — {src.pdf_url}"
-            if src.pdf_url
-            else f"[{i}] {src.date_filed or 'unknown date'}"
-            for i, src in enumerate(response.citations[:5], start=1)
-        ]
-        text += "\n\n**Sources:**\n" + "\n".join(citation_lines)
+        lines: list[str] = []
+        for i, src in enumerate(response.citations[:5], start=1):
+            date = _readable_date(src.date_filed)
+            if src.pdf_url:
+                filename = src.pdf_url.rstrip("/").split("/")[-1]
+                entry = f"{i}. [{filename}]({src.pdf_url})"
+            else:
+                entry = f"{i}. *docket entry*"
+            if date:
+                entry += f" — {date}"
+            lines.append(entry)
+        text += "\n\n**Sources**\n" + "\n".join(lines)
+
     return textwrap.shorten(text, width=_DISCORD_MAX_LENGTH, placeholder="...")
 
 

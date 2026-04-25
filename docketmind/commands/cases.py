@@ -1,5 +1,6 @@
 """Case management commands: add, remove, and list tracked cases."""
 
+import shutil
 from datetime import datetime
 
 from loguru import logger
@@ -7,6 +8,8 @@ from sqlalchemy.exc import IntegrityError
 
 from docketmind import schedule, store
 from docketmind.commands import CommandParam, command
+from docketmind.configure import settings
+from docketmind.index import delete_case_vectors
 from docketmind.ingest import fetch_case_metadata
 from docketmind.platforms import BotResponse, PermissionLevel, PlatformEvent
 
@@ -42,7 +45,7 @@ async def add_case(event: PlatformEvent) -> BotResponse:
 
         rss_url = f"https://www.courtlistener.com/docket/{court_listener_id}/feed/"
         try:
-            name, court = await fetch_case_metadata(rss_url)
+            name = await fetch_case_metadata(rss_url)
         except Exception as exc:
             logger.error("Failed to fetch metadata for case {}: {}", court_listener_id, exc)
             return BotResponse(
@@ -51,7 +54,7 @@ async def add_case(event: PlatformEvent) -> BotResponse:
                 ephemeral=True,
             )
 
-        case = store.Case(court_listener_id=court_listener_id, name=name, court=court)
+        case = store.Case(court_listener_id=court_listener_id, name=name)
         session.add(case)
         try:
             await session.commit()
@@ -63,7 +66,7 @@ async def add_case(event: PlatformEvent) -> BotResponse:
         await session.refresh(case)
 
     await schedule.add_case(case.id)
-    return BotResponse(text=f"Now tracking **{name}** (`{court_listener_id}`) — {court}.")
+    return BotResponse(text=f"Now tracking **{name}** (`{court_listener_id}`).")
 
 
 @command(
@@ -96,6 +99,13 @@ async def remove_case(event: PlatformEvent) -> BotResponse:
         await session.commit()
 
     schedule.remove_case(case_id)
+    delete_case_vectors(case_id)
+
+    pdf_dir = settings.pdfs_path / court_listener_id
+    if pdf_dir.is_dir():
+        shutil.rmtree(pdf_dir)
+        logger.info("Removed cached PDFs at {}", pdf_dir)
+
     return BotResponse(
         text=f"Stopped tracking **{name}** (`{court_listener_id}`).",
         ephemeral=True,
@@ -115,7 +125,7 @@ async def list_cases(event: PlatformEvent) -> BotResponse:
         return BotResponse(text="No cases are currently being tracked.")
 
     lines = [
-        f"**{c.name}** (`{c.court_listener_id}`) — {c.court} — last synced: {_fmt_time(c.last_synced_at)}"  # noqa: E501
+        f"**{c.name}** (`{c.court_listener_id}`) — last synced: {_fmt_time(c.last_synced_at)}"
         for c in cases
     ]
     return BotResponse(text="**Tracked Cases:**\n" + "\n".join(lines))

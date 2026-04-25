@@ -13,7 +13,6 @@ def test_case_rss_url_derived_from_court_listener_id():
     case = Case(
         court_listener_id="12345678",
         name="United States v. Doe",
-        court="D. Mass.",
     )
     assert case.rss_url == "https://www.courtlistener.com/docket/12345678/feed/"
 
@@ -42,7 +41,7 @@ def test_docket_entry_document_defaults():
 
 def test_case_id_is_uuid_at_construction():
     """Case.id must be a valid UUID string immediately after __init__, before any flush."""
-    case = Case(court_listener_id="abc", name="Test", court="D. Mass.")
+    case = Case(court_listener_id="abc", name="Test")
     UUID(case.id)
 
 
@@ -65,7 +64,6 @@ async def test_case_can_be_saved_and_retrieved(in_memory_db):
         case = Case(
             court_listener_id="99999",
             name="Test v. Case",
-            court="D. Mass.",
         )
         session.add(case)
         await session.commit()

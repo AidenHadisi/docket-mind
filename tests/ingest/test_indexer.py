@@ -45,8 +45,7 @@ def tmp_index(tmp_path: Path, monkeypatch):
 @pytest.fixture
 def sample_entry() -> DocketEntry:
     """A minimal DocketEntry for vector-store indexing tests."""
-    return DocketEntry(
-        id="entry-001",
+    entry = DocketEntry(
         case_id="case-001",
         court_listener_id="cl-001",
         title="Order on Motion to Dismiss",
@@ -55,17 +54,20 @@ def sample_entry() -> DocketEntry:
         date_filed=datetime(2026, 4, 7, tzinfo=UTC),
         embedded=False,
     )
+    object.__setattr__(entry, "id", "entry-001")
+    return entry
 
 
 @pytest.fixture
-def sample_document() -> DocketEntryDocument:
+def sample_document(sample_entry: DocketEntry) -> DocketEntryDocument:
     """A minimal DocketEntryDocument linked to sample_entry."""
-    return DocketEntryDocument(
-        id="doc-001",
-        docket_entry_id="entry-001",
+    doc = DocketEntryDocument(
+        docket_entry_id=sample_entry.id,
         pdf_url="https://storage.courtlistener.com/recap/doc.pdf",
         downloaded=True,
     )
+    object.__setattr__(doc, "id", "doc-001")
+    return doc
 
 
 @pytest.fixture
@@ -76,11 +78,11 @@ def pdf_path(tmp_path: Path) -> Path:
     return path
 
 
-def test_index_directory_is_created(_tmp_index, tmp_path: Path):
+def test_index_directory_is_created(tmp_index, tmp_path: Path):
     assert (tmp_path / "index").exists()
 
 
-async def test_upsert_entry_indexes_without_error(_tmp_index, sample_entry: DocketEntry):
+async def test_upsert_entry_indexes_without_error(tmp_index, sample_entry: DocketEntry):
     await upsert_entry(sample_entry)
 
 
@@ -93,7 +95,7 @@ async def test_upsert_entry_is_idempotent(tmp_index, sample_entry: DocketEntry):
 
 
 async def test_upsert_document_indexes_without_error(
-    _tmp_index, sample_document: DocketEntryDocument, pdf_path: Path
+    tmp_index, sample_document: DocketEntryDocument, pdf_path: Path
 ):
     await upsert_document(sample_document, pdf_path)
 

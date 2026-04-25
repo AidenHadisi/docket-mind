@@ -72,12 +72,11 @@ def _extract_pdf_urls(entry: feedparser.FeedParserDict) -> list[str]:
     return urls
 
 
-async def fetch_case_metadata(rss_url: str) -> tuple[str, str]:
-    """Return (case_name, court) from a CourtListener RSS feed header.
+async def fetch_case_metadata(rss_url: str) -> str:
+    """Return the case name from a CourtListener RSS feed header.
 
-    Parses feed.feed.title for the case name and feed.feed.subtitle for the
-    court name. Returns ("Unknown Case", "Unknown Court") if the feed is
-    empty or the fields are absent.
+    Parses feed.feed.title for the case name.
+    Returns "Unknown Case" if the feed is empty or the field is absent.
 
     Raises httpx.HTTPStatusError on non-2xx responses.
     """
@@ -86,9 +85,7 @@ async def fetch_case_metadata(rss_url: str) -> tuple[str, str]:
 
     feed = feedparser.parse(response.text)
     feed_meta: dict[str, Any] = feed.feed  # type: ignore[assignment]  # stubs incorrectly type feed.feed as list
-    name: str = str(feed_meta.get("title", "Unknown Case")) or "Unknown Case"
-    court: str = str(feed_meta.get("subtitle", "Unknown Court")) or "Unknown Court"
-    return name, court
+    return str(feed_meta.get("title", "Unknown Case")) or "Unknown Case"
 
 
 async def fetch_feed(rss_url: str) -> list[RawEntry]:
@@ -228,11 +225,14 @@ async def sync_case(case_id: str) -> SyncResult:
         await session.commit()
 
         # Step 3: Download pending PDFs
+        # PDFs are stored under court_listener_id (not the internal UUID) so
+        # files persist as a cache across remove/re-add cycles.
         for doc in await list_pending_downloads(session, case_id):
             filename = doc.pdf_url.rstrip("/").split("/")[-1]
-            dest = settings.pdfs_path / case_id / filename
+            dest = settings.pdfs_path / case.court_listener_id / filename
             try:
-                await download_pdf(doc.pdf_url, dest)
+                if not dest.exists():
+                    await download_pdf(doc.pdf_url, dest)
                 doc.pdf_path = str(dest)
                 doc.downloaded = True
                 result.downloaded_documents += 1
@@ -255,7 +255,11 @@ async def sync_case(case_id: str) -> SyncResult:
         for doc in await list_unembedded_documents(session, case_id):
             if doc.pdf_path:
                 try:
-                    await upsert_document(doc, Path(doc.pdf_path))
+                    await upsert_document(
+                        doc,
+                        Path(doc.pdf_path),
+                        date_filed=doc.entry.date_filed.isoformat(),
+                    )
                     doc.embedded = True
                 except Exception as exc:
                     result.errors.append(f"Embed failed for doc {doc.id}: {exc}")

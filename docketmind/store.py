@@ -41,7 +41,6 @@ class Case(Base):
     # Required init fields
     court_listener_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     name: Mapped[str] = mapped_column(String)
-    court: Mapped[str] = mapped_column(String)
 
     # Optional init fields
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
@@ -209,10 +208,17 @@ async def list_unembedded_entries(session: AsyncSession, case_id: str) -> list[D
 async def list_unembedded_documents(
     session: AsyncSession, case_id: str
 ) -> list[DocketEntryDocument]:
-    """Return downloaded documents for a case that have not yet been embedded."""
+    """Return downloaded documents for a case that have not yet been embedded.
+
+    Eagerly loads the parent DocketEntry so callers can access entry
+    metadata (e.g. date_filed) without an extra query.
+    """
+    from sqlalchemy.orm import joinedload
+
     result = await session.execute(
         select(DocketEntryDocument)
         .join(DocketEntry)
+        .options(joinedload(DocketEntryDocument.entry))
         .where(DocketEntry.case_id == case_id)
         .where(DocketEntryDocument.downloaded.is_(True))
         .where(DocketEntryDocument.embedded.is_(False))

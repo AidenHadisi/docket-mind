@@ -21,7 +21,6 @@ async def saved_case() -> Case:
         case = Case(
             court_listener_id="12345",
             name="United States v. Doe",
-            court="D. Mass.",
         )
         session.add(case)
         await session.commit()
@@ -35,7 +34,6 @@ def raw_entry_no_pdf() -> RawEntry:
         court_listener_id="cl-001",
         title="Order on Motion",
         content="Court rules on motion.",
-        content_hash="hash-001",
         date_filed=datetime(2026, 4, 7, tzinfo=UTC),
         pdf_urls=[],
     )
@@ -48,7 +46,6 @@ def raw_entry_with_pdf() -> RawEntry:
         court_listener_id="cl-002",
         title="Filed Motion",
         content="Defendant files motion.",
-        content_hash="hash-002",
         date_filed=datetime(2026, 4, 8, tzinfo=UTC),
         pdf_urls=["https://storage.courtlistener.com/recap/doc.pdf"],
     )
