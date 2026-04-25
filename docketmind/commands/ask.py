@@ -19,5 +19,4 @@ async def ask(event: PlatformEvent) -> BotResponse:
     question: str = event.args["question"]
     case_id: str | None = event.args.get("case_id")
     result = await query(question, case_id=case_id)
-    text = f"**Q:** {question}\n\n{result.answer}"
-    return BotResponse(text=text, citations=result.sources)
+    return BotResponse(text=result.answer, citations=result.sources, question=question)

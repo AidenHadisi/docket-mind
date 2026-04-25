@@ -16,6 +16,7 @@ class SourceChunk(BaseModel):
     case_id: str | None = None
     court_listener_id: str | None = None
     date_filed: str | None = None
+    title: str | None = None
     docket_entry_id: str | None = None
     pdf_url: str | None = None
 

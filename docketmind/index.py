@@ -66,6 +66,7 @@ async def upsert_entry(entry: DocketEntry) -> None:
             "case_id": str(entry.case_id),
             "court_listener_id": entry.court_listener_id,
             "date_filed": entry.date_filed.isoformat(),
+            "title": entry.title,
             "type": "docket_entry",
         },
     )

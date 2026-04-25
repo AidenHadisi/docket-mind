@@ -49,11 +49,13 @@ class BotResponse(BaseModel):
 
     text is always populated. citations are optional source chunks from RAG.
     ephemeral hints that only the requesting user should see the response.
+    question echoes the original user query so adapters can render it as a header.
     """
 
     text: str
     citations: list[SourceChunk] = []
     ephemeral: bool = False
+    question: str | None = None
 
 
 class Platform(ABC):

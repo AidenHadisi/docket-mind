@@ -2,7 +2,6 @@
 
 import asyncio
 import inspect
-import textwrap
 from collections import deque
 from collections.abc import AsyncIterator
 from typing import Any
@@ -12,14 +11,16 @@ from discord import app_commands
 from discord.ext import commands as ext_commands
 from loguru import logger
 
+from docketmind.chat import SourceChunk
 from docketmind.commands import CommandSpec
 from docketmind.configure import settings
 from docketmind.platforms import BotResponse, PermissionLevel, Platform, PlatformEvent
 
-# Maximum characters in a Discord message
 _DISCORD_MAX_LENGTH = 2000
-# Reserve room for citations; truncate answer text at this limit
-_ANSWER_MAX_LENGTH = 1800
+_EMBED_DESC_MAX = 4096
+_EMBED_FIELD_MAX = 1024
+
+_EMBED_COLOR = 0x3B82F6  # blue accent
 
 
 def _readable_date(iso: str | None) -> str:
@@ -35,31 +36,57 @@ def _readable_date(iso: str | None) -> str:
         return iso
 
 
-def _format_response(response: BotResponse) -> str:
-    """Render a BotResponse as a Discord message using markdown formatting.
+def _truncate(text: str, limit: int) -> str:
+    """Truncate text to *limit* characters at a word boundary, preserving newlines."""
+    if len(text) <= limit:
+        return text
+    truncated = text[: limit - 3]
+    last_space = truncated.rfind(" ")
+    if last_space > limit // 2:
+        truncated = truncated[:last_space]
+    return truncated + "..."
 
-    The answer is displayed in a blockquote. Up to 5 source citations are
-    appended as a numbered list with masked links and human-readable dates.
-    The combined output never exceeds _DISCORD_MAX_LENGTH.
+
+def _source_label(src: SourceChunk) -> str:
+    """Build a Discord-markdown label for a single source citation.
+
+    PDFs link to the PDF URL. Docket entries link to CourtListener using the
+    court_listener_id (which is the full entry URL from the Atom feed).
     """
-    answer = textwrap.shorten(response.text, width=_ANSWER_MAX_LENGTH, placeholder="...")
-    text = "\n".join(f"> {line}" for line in answer.splitlines())
+    if src.pdf_url:
+        filename = src.pdf_url.rstrip("/").split("/")[-1]
+        return f"[{filename}]({src.pdf_url})"
+
+    name = src.title or "Docket entry"
+    if src.court_listener_id and src.court_listener_id.startswith("http"):
+        return f"[{name}]({src.court_listener_id})"
+    return name
+
+
+def _build_embed(response: BotResponse) -> discord.Embed:
+    """Build a Discord Embed for a RAG answer with source citations."""
+    title = response.question or "Answer"
+    description = _truncate(response.text, _EMBED_DESC_MAX)
+    embed = discord.Embed(title=title, description=description, color=_EMBED_COLOR)
 
     if response.citations:
         lines: list[str] = []
         for i, src in enumerate(response.citations[:5], start=1):
             date = _readable_date(src.date_filed)
-            if src.pdf_url:
-                filename = src.pdf_url.rstrip("/").split("/")[-1]
-                entry = f"{i}. [{filename}]({src.pdf_url})"
-            else:
-                entry = f"{i}. *docket entry*"
+            label = _source_label(src)
+            entry = f"{i}. {label}"
             if date:
                 entry += f" — {date}"
             lines.append(entry)
-        text += "\n\n**Sources**\n" + "\n".join(lines)
+        sources_text = _truncate("\n".join(lines), _EMBED_FIELD_MAX)
+        embed.add_field(name="Sources", value=sources_text, inline=False)
 
-    return textwrap.shorten(text, width=_DISCORD_MAX_LENGTH, placeholder="...")
+    return embed
+
+
+def _format_plain(response: BotResponse) -> str:
+    """Render a BotResponse as plain Discord markdown (non-embed fallback)."""
+    return _truncate(response.text, _DISCORD_MAX_LENGTH)
 
 
 class DiscordPlatform(Platform):
@@ -203,8 +230,9 @@ class DiscordPlatform(Platform):
     async def send(self, channel_id: str, response: BotResponse) -> None:
         """Send a BotResponse as a Discord followup message.
 
-        Pops the oldest stored interaction for channel_id (FIFO) and calls
-        followup.send(). No-ops if no interaction is available.
+        Uses an embed for RAG answers (when question or citations are present)
+        and plain text for simple command replies. Pops the oldest stored
+        interaction for channel_id (FIFO). No-ops if none is available.
         """
         q = self._pending.get(channel_id)
         if not q:
@@ -212,8 +240,13 @@ class DiscordPlatform(Platform):
         interaction = q.popleft()
         if not q:
             del self._pending[channel_id]
-        content = _format_response(response)
-        await interaction.followup.send(content=content, ephemeral=response.ephemeral)
+
+        if response.question or response.citations:
+            embed = _build_embed(response)
+            await interaction.followup.send(embed=embed, ephemeral=response.ephemeral)
+        else:
+            content = _format_plain(response)
+            await interaction.followup.send(content=content, ephemeral=response.ephemeral)
 
     async def connect(self) -> None:
         """Fire the discord.py client as a background task.
