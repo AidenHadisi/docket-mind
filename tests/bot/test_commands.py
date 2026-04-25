@@ -56,7 +56,8 @@ async def test_ask_calls_query_when_no_case_id(monkeypatch):
     response = await ask.__wrapped__(_event(args={"question": "What happened?", "case_id": None}))  # type: ignore[attr-defined]
 
     ask_module.query.assert_awaited_once_with("What happened?", case_id=None)  # type: ignore[attr-defined]
-    assert response.text == "The answer."
+    assert "What happened?" in response.text
+    assert "The answer." in response.text
 
 
 async def test_ask_passes_case_id_to_query(monkeypatch):
@@ -73,4 +74,5 @@ async def test_ask_passes_case_id_to_query(monkeypatch):
     )
 
     ask_module.query.assert_awaited_once_with("Any updates?", case_id="case-abc")  # type: ignore[attr-defined]
-    assert response.text == "Scoped answer."
+    assert "Any updates?" in response.text
+    assert "Scoped answer." in response.text
