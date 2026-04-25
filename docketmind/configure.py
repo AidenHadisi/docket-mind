@@ -26,7 +26,7 @@ class Config(BaseConfig):
 
     # LLM
     llm_provider: Literal["openai", "anthropic", "mock"] = "openai"
-    llm_model: str = "gpt-4o"
+    llm_model: str = "gpt-5.4-mini"
     llm_api_key: str
     llm_extra: dict[str, Any] = {}
 
