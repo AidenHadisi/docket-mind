@@ -47,48 +47,6 @@ def _truncate(text: str, limit: int) -> str:
     return truncated + "..."
 
 
-def _source_label(src: SourceChunk) -> str:
-    """Build a Discord-markdown label for a single source citation.
-
-    PDFs link to the PDF URL. Docket entries link to CourtListener using the
-    court_listener_id (which is the full entry URL from the Atom feed).
-    """
-    if src.pdf_url:
-        filename = src.pdf_url.rstrip("/").split("/")[-1]
-        return f"[{filename}]({src.pdf_url})"
-
-    name = src.title or "Docket entry"
-    if src.court_listener_id and src.court_listener_id.startswith("http"):
-        return f"[{name}]({src.court_listener_id})"
-    return name
-
-
-def _build_embed(response: BotResponse) -> discord.Embed:
-    """Build a Discord Embed for a RAG answer with source citations."""
-    title = response.question or "Answer"
-    description = _truncate(response.text, _EMBED_DESC_MAX)
-    embed = discord.Embed(title=title, description=description, color=_EMBED_COLOR)
-
-    if response.citations:
-        lines: list[str] = []
-        for i, src in enumerate(response.citations[:5], start=1):
-            date = _readable_date(src.date_filed)
-            label = _source_label(src)
-            entry = f"{i}. {label}"
-            if date:
-                entry += f" — {date}"
-            lines.append(entry)
-        sources_text = _truncate("\n".join(lines), _EMBED_FIELD_MAX)
-        embed.add_field(name="Sources", value=sources_text, inline=False)
-
-    return embed
-
-
-def _format_plain(response: BotResponse) -> str:
-    """Render a BotResponse as plain Discord markdown (non-embed fallback)."""
-    return _truncate(response.text, _DISCORD_MAX_LENGTH)
-
-
 class DiscordPlatform(Platform):
     """Maps discord.py slash command interactions to PlatformEvent/BotResponse.
 
@@ -227,6 +185,56 @@ class DiscordPlatform(Platform):
         while True:
             yield await self._event_queue.get()
 
+    # ------------------------------------------------------------------
+    # Response rendering
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _source_label(src: SourceChunk) -> str:
+        """Build a Discord-markdown label for a single source citation.
+
+        PDFs link to the PDF URL. Docket entries link to CourtListener using
+        the court_listener_id (which is the full entry URL from the Atom feed).
+        """
+        if src.pdf_url:
+            filename = src.pdf_url.rstrip("/").split("/")[-1]
+            return f"[{filename}]({src.pdf_url})"
+
+        name = src.title or "Docket entry"
+        if src.court_listener_id and src.court_listener_id.startswith("http"):
+            return f"[{name}]({src.court_listener_id})"
+        return name
+
+    @staticmethod
+    def _build_embed(response: BotResponse) -> discord.Embed:
+        """Build a Discord Embed for a RAG answer with source citations."""
+        title = response.question or "Answer"
+        description = _truncate(response.text, _EMBED_DESC_MAX)
+        embed = discord.Embed(title=title, description=description, color=_EMBED_COLOR)
+
+        if response.citations:
+            lines: list[str] = []
+            for i, src in enumerate(response.citations[:5], start=1):
+                date = _readable_date(src.date_filed)
+                label = DiscordPlatform._source_label(src)
+                entry = f"{i}. {label}"
+                if date:
+                    entry += f" — {date}"
+                lines.append(entry)
+            sources_text = _truncate("\n".join(lines), _EMBED_FIELD_MAX)
+            embed.add_field(name="Sources", value=sources_text, inline=False)
+
+        return embed
+
+    @staticmethod
+    def _format_plain(response: BotResponse) -> str:
+        """Render a BotResponse as plain Discord markdown (non-embed fallback)."""
+        return _truncate(response.text, _DISCORD_MAX_LENGTH)
+
+    # ------------------------------------------------------------------
+    # Platform interface
+    # ------------------------------------------------------------------
+
     async def send(self, channel_id: str, response: BotResponse) -> None:
         """Send a BotResponse as a Discord followup message.
 
@@ -242,10 +250,10 @@ class DiscordPlatform(Platform):
             del self._pending[channel_id]
 
         if response.question or response.citations:
-            embed = _build_embed(response)
+            embed = self._build_embed(response)
             await interaction.followup.send(embed=embed, ephemeral=response.ephemeral)
         else:
-            content = _format_plain(response)
+            content = self._format_plain(response)
             await interaction.followup.send(content=content, ephemeral=response.ephemeral)
 
     async def connect(self) -> None:
