@@ -1,0 +1,36 @@
+---
+description: Pydantic model conventions for DocketMind
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Pydantic Model Hygiene
+
+## Exclude non-serializable fields
+
+Any field that holds a raw platform object, socket, connection, or other non-serializable value must use `Field(exclude=True)` so Pydantic never tries to serialize or validate it.
+
+```python
+# BAD — Pydantic will attempt to serialize the raw object
+raw: Any = None
+
+# GOOD — excluded from serialization, still accessible in code
+raw: Any = Field(default=None, exclude=True)
+```
+
+## Use explicit `Field(...)` for semantic defaults
+
+When a default has special meaning (e.g. empty list, zero cooldown, exclusion), prefer `Field(default=..., ...)` over bare assignment so the intent is visible and documented.
+
+```python
+# Acceptable for simple scalars
+text: str
+
+# Prefer Field for complex defaults or when extra metadata applies
+citations: list[SourceChunk] = Field(default_factory=list)
+ephemeral: bool = Field(default=False, description="Only the invoking user sees this")
+```
+
+## Model inheritance
+
+All cross-platform data models (events, responses) inherit from `pydantic.BaseModel`. Do not use plain dataclasses for models that cross module boundaries or may be serialized. Use `dataclass(frozen=True, slots=True)` only for internal value objects that never need serialization (e.g. `CommandSpec`).
