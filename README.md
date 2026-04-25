@@ -1,213 +1,181 @@
 # DocketMind
 
-DocketMind is an AI-powered legal docket assistant that tracks lawsuits, indexes court filings, and answers questions about active cases in real time. It runs as a Discord bot, giving teams instant access to up-to-date case intelligence through natural language queries.
+**AI-powered Discord bot that tracks federal court cases and answers questions about them.**
 
----
+![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)
+![License MIT](https://img.shields.io/badge/license-MIT-green)
+![discord.py](https://img.shields.io/badge/discord.py-2.3%2B-7289da)
 
-## Overview
-
-Legal teams, journalists, researchers, and advocates often need to track dozens of active lawsuits simultaneously. CourtListener publishes docket entries for federal cases via RSS, but reading raw docket text is time-consuming and requires legal context to interpret.
-
-DocketMind bridges that gap. Administrators subscribe the bot to cases. The bot continuously monitors CourtListener RSS feeds, pulls every new docket entry, and indexes both the text and any attached PDF documents into a vector store. A per-case memory keeps a running summary of each lawsuit's status. When users ask questions, the bot retrieves relevant documents using RAG and answers with an LLM — with citations back to the original filings.
-
----
+DocketMind monitors federal lawsuits via [CourtListener](https://www.courtlistener.com/) RSS feeds. When new docket entries appear, it downloads attached PDFs, indexes everything into a vector store, and lets users ask natural-language questions with source citations -- all through Discord slash commands.
 
 ## Features
 
-### Case Management
-- Admins add or remove cases via bot commands on any supported platform
-- Each case is tracked by its CourtListener case identifier
-- Cases include metadata: case name, court, docket number, parties, date added
-
-### Automated Docket Monitoring
-- Polls CourtListener RSS feeds for new docket entries on a configurable schedule
-- Each new entry is saved locally with full metadata (date filed, document type, filing party, description)
-- PDF attachments linked in the RSS entry are downloaded and stored alongside the entry
-
-### Document Indexing & Embeddings
-- All docket entry text and PDF content is chunked and embedded into a vector store
-- Embeddings are updated incrementally — only new or changed content is re-indexed
-- Supports multi-page PDFs with page-level chunking for precise retrieval
-
-### Per-Case Memory
-- Each lawsuit has a persistent memory document that is updated whenever new entries arrive
-- The memory summarizes: current posture, recent filings, key rulings, upcoming deadlines, and major parties/arguments
-- Memory is used alongside RAG results to give the LLM rich context without overloading the prompt
-
-### Natural Language Q&A
-- Users ask questions in plain English directly in Discord
-- The bot retrieves relevant chunks via vector similarity search and passes them to the LLM with the case memory
-- Responses include source citations (docket entry number, document name, filing date)
-- Supports multi-turn conversation within a thread or session
-
-### Manual Document Ingestion
-- Admins can upload PDF files directly to a case via bot commands
-- Manually added documents follow the same ingestion pipeline: stored, chunked, embedded, and reflected in case memory
-- Useful for adding documents not on CourtListener (exhibits, state filings, private correspondence)
-
-### Platform Support
-- Runs on Discord
-- Slash commands for admin operations
-- Designed to support additional platforms (Slack, Telegram) in the future
-
----
-
-## Supported Platforms
-
-| Platform | User Q&A | Admin Commands | File Upload |
-|----------|----------|----------------|-------------|
-| Discord  | Yes      | Yes            | Yes         |
-| Slack    | Planned  | Planned        | Planned     |
-| Telegram | Planned  | Planned        | Planned     |
-
----
-
-## Admin Commands
-
-All commands are Discord slash commands.
-
-| Command | Description |
-|---------|-------------|
-| `/docket add <case-id>` | Subscribe to a CourtListener case by ID or URL |
-| `/docket remove <case-id>` | Unsubscribe and stop monitoring a case |
-| `/docket list` | List all currently tracked cases |
-| `/docket status <case-id>` | Show latest sync status and entry count for a case |
-| `/docket upload <case-id>` | Attach a PDF to a specific case (via file upload) |
-| `/docket sync <case-id>` | Manually trigger an RSS sync for a case |
-
----
+- **Case tracking** -- add any federal case by its CourtListener docket ID
+- **Automatic polling** -- RSS feeds are checked on a configurable interval (default: 10 minutes)
+- **PDF ingestion** -- attached court documents are downloaded, chunked, and embedded
+- **RAG-powered Q&A** -- ask questions and get answers grounded in actual filings, with citations
+- **Discord slash commands** -- admin-gated case management, per-user cooldowns
+- **Async everything** -- built on asyncio end-to-end (discord.py, httpx, SQLAlchemy, APScheduler)
+- **Extensible platform layer** -- Discord is shipped; the adapter pattern makes adding Slack or Telegram straightforward
 
 ## Architecture
 
-```
-Discord Bot
-        │
-        ▼
-   Command Router
-        │
-   ┌────┴──────────────────────┐
-   │                           │
-Admin Commands           User Q&A Handler
-   │                           │
-   ▼                           ▼
-Case Registry           Retrieval Pipeline
-   │                      │           │
-   ▼                  Vector       Case Memory
-RSS Poller            Search           │
-   │                      └─────┬──────┘
-   ▼                            ▼
-Ingestion Pipeline           LLM (with citations)
-  ├── Docket Entry Parser          │
-  ├── PDF Downloader               ▼
-  ├── Text Chunker           Response → Discord
-  ├── Embedder
-  └── Memory Updater
+```mermaid
+flowchart LR
+    CL["CourtListener RSS"] -->|poll| Ingest
+    Ingest -->|entries & PDFs| SQLite
+    Ingest -->|chunks & embeddings| VectorIndex["Vector Index"]
+    User -->|slash command| Discord
+    Discord -->|PlatformEvent| Dispatch
+    Dispatch -->|/ask| RAG["RAG Query"]
+    Dispatch -->|/add_case /remove_case /list_cases| CaseMgmt["Case Management"]
+    RAG --> VectorIndex
+    RAG -->|answer + citations| Discord
+    CaseMgmt --> SQLite
+    CaseMgmt -->|schedule sync| Ingest
 ```
 
----
+## Commands
 
-## Data Sources
+| Command | Access | Description |
+|---------|--------|-------------|
+| `/ask` | Everyone | Ask a question about tracked cases. Optionally scope to a specific case. |
+| `/add_case` | Admin | Start tracking a case by CourtListener docket ID. Triggers an immediate backfill. |
+| `/remove_case` | Admin | Stop tracking a case, delete all data, and remove cached PDFs. |
+| `/list_cases` | Everyone | List all tracked cases with their last sync time. |
 
-- **CourtListener RSS Feeds** — docket entries for federal cases, including PACER document links
-- **CourtListener PACER API** — optionally used to fetch full document metadata
-- **Manually Uploaded PDFs** — documents provided directly by admins via bot commands
+## Quick Start
 
----
+### Prerequisites
 
-## Technology Stack (Planned)
-
-| Layer | Technology |
-|-------|------------|
-| Runtime | Python 3.13+ |
-| Package Management | uv |
-| Linting & Formatting | Ruff |
-| Type Checking | Pyright |
-| Data Validation | Pydantic v2 |
-| Configuration | pydantic-settings (`.env` + environment variables) |
-| Git Hooks | pre-commit |
-| Bot Framework | discord.py |
-| LLM | OpenAI (via LlamaIndex) |
-| Embeddings | OpenAI `text-embedding-3-small` (via LlamaIndex) |
-| Vector Store | LlamaIndex SimpleVectorStore (disk-persisted) |
-| Database | SQLite |
-| ORM | SQLAlchemy 2.0 |
-| DB Migrations | Alembic |
-| Logging | Loguru |
-| Testing | pytest, pytest-asyncio, pytest-cov, respx, pytest-mock, factory-boy |
-| PDF Parsing | LlamaIndex built-in document loaders |
-| Chunking | LlamaIndex text splitters |
-| RAG Pipeline | LlamaIndex query engine |
-| HTTP Client | httpx (async) |
-| Retries | stamina |
-| Async File I/O | aiofiles |
-| RSS Parsing | feedparser |
-| RSS Polling | APScheduler (in-process interval scheduler) |
-| Storage | Local filesystem (PDFs and raw docket files) |
-
----
-
-## Requirements
-
-### Functional Requirements
-
-1. The system must monitor CourtListener RSS feeds for new docket entries on each tracked case
-2. New docket entries must be stored with full metadata within 15 minutes of publication
-3. PDF attachments in docket entries must be automatically downloaded and indexed
-4. Each case must maintain an up-to-date summary memory refreshed on every new entry
-5. Users must be able to ask free-form questions about any tracked case
-6. Answers must cite the source docket entry or document
-7. Admins must be able to add and remove cases via bot commands
-8. Admins must be able to manually upload PDFs to a specific case
-9. The bot must operate on Discord
-10. Admin commands must be restricted to users with an admin role on the platform
-
-### Non-Functional Requirements
-
-1. **Latency** — Q&A responses must complete within 10 seconds under normal load
-2. **Reliability** — RSS polling must recover from transient failures without losing entries
-3. **Idempotency** — Re-syncing a case must not create duplicate entries or embeddings
-4. **Scalability** — The system must handle at least 100 tracked cases concurrently
-5. **Security** — Admin commands must be gated behind platform-level role checks
-6. **Observability** — All ingestion events and query traces must be logged for debugging
-
----
-
-## Project Structure (Planned)
-
-```
-docket-mind/
-├── docketmind/
-│   ├── ingestion/     # RSS polling, PDF download, chunking, embedding, memory updates
-│   ├── intelligence/  # RAG pipeline, LLM, citations, Q&A
-│   ├── bot/
-│   │   ├── base.py        # Abstract platform interface
-│   │   ├── discord/       # Discord adapter (slash commands, event handlers)
-│   │   ├── slack/         # (future)
-│   │   └── telegram/      # (future)
-│   └── config.py          # pydantic-settings configuration
-├── data/              # Local storage (SQLite DB, ChromaDB index, PDFs)
-├── tests/
-├── alembic/
-├── docs/
-├── pyproject.toml
-└── README.md
-```
-
----
-
-## Getting Started
-
-> Setup instructions will be added once the initial implementation is complete.
-
-Prerequisites:
 - Python 3.13+
-- uv
-- Anthropic API key
-- OpenAI API key (for embeddings)
-- Discord bot token
+- [uv](https://docs.astral.sh/uv/) package manager
+- A [Discord bot token](https://discord.com/developers/applications)
+- An [OpenAI API key](https://platform.openai.com/api-keys) (for LLM and embeddings)
 
----
+### Setup
+
+```bash
+git clone https://github.com/AidenHadisi/docket-mind.git
+cd docket-mind
+
+# Install dependencies
+uv sync
+
+# Configure environment
+cp .env.example .env
+# Edit .env and fill in DISCORD_BOT_TOKEN, LLM_API_KEY, and EMBED_API_KEY
+
+# Run database migrations
+uv run alembic upgrade head
+
+# Start the bot
+uv run python -m docketmind
+```
+
+### Discord Bot Permissions
+
+When creating your bot in the Discord Developer Portal, enable:
+
+- **Scopes:** `bot`, `applications.commands`
+- **Permissions:** Send Messages, Use Slash Commands, Embed Links
+
+For development, set `DISCORD_GUILD_ID` in your `.env` so slash commands sync instantly to your test server. In production, leave it unset for global sync (takes up to 1 hour).
+
+## Configuration
+
+All configuration is via environment variables (or a `.env` file). See [`.env.example`](.env.example) for the full template.
+
+### Required
+
+| Variable | Description |
+|----------|-------------|
+| `DISCORD_BOT_TOKEN` | Discord bot token |
+| `LLM_API_KEY` | API key for the LLM provider (OpenAI by default) |
+| `EMBED_API_KEY` | API key for the embedding provider (same key if using OpenAI for both) |
+
+### Optional
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCORD_GUILD_ID` | *(unset)* | Server ID for instant slash-command sync during development |
+| `LLM_PROVIDER` | `openai` | LLM provider: `openai`, `anthropic`, or `mock` |
+| `LLM_MODEL` | `gpt-4o` | Model name passed to the LLM provider |
+| `EMBED_PROVIDER` | `openai` | Embedding provider: `openai` or `mock` |
+| `EMBED_MODEL` | `text-embedding-3-small` | Model name for embeddings |
+| `DATA_DIR` | `data` | Root directory for the SQLite database, vector index, and downloaded PDFs |
+| `CHUNK_SIZE` | `1024` | Token chunk size for document splitting |
+| `CHUNK_OVERLAP` | `200` | Overlap between chunks |
+| `SIMILARITY_TOP_K` | `5` | Number of chunks retrieved per query |
+| `POLL_INTERVAL_SECONDS` | `600` | RSS poll interval in seconds (minimum 60) |
+| `LOG_LEVEL` | `INFO` | Logging level |
+
+## Development
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run a specific test file
+uv run pytest tests/ingest/test_rss.py
+
+# Run tests matching a pattern
+uv run pytest -k "test_sync_case"
+
+# Lint and format
+uv run ruff check .
+uv run ruff format .
+
+# Type check
+uv run pyright
+
+# Generate a new database migration
+uv run alembic revision --autogenerate -m "description of change"
+
+# Apply migrations
+uv run alembic upgrade head
+```
+
+Tests use mock providers for the LLM and embeddings, so no API keys are needed to run the test suite.
+
+## Project Structure
+
+```
+docketmind/
+├── __init__.py          # LlamaIndex LLM and embedding configuration
+├── __main__.py          # Application entry point and event loop
+├── configure.py         # Pydantic Settings (loads .env)
+├── store.py             # SQLAlchemy async models and queries
+├── ingest.py            # RSS parsing, PDF download, sync pipeline
+├── index.py             # LlamaIndex vector store (upsert, delete, persist)
+├── chat.py              # RAG query engine and response formatting
+├── schedule.py          # APScheduler job management (per-case polling)
+├── commands/
+│   ├── __init__.py      # @command decorator, registry, cooldowns
+│   ├── ask.py           # /ask — RAG Q&A
+│   └── cases.py         # /add_case, /remove_case, /list_cases
+└── platforms/
+    ├── __init__.py      # Abstract Platform, PlatformEvent, BotResponse
+    └── discord.py       # Discord adapter (slash commands, message formatting)
+```
+
+### Data directory (gitignored)
+
+```
+data/
+├── docketmind.db        # SQLite database
+├── index/               # Persisted LlamaIndex vector store
+└── pdfs/                # Downloaded court documents, organized by case
+```
+
+## How It Works
+
+1. An admin runs `/add_case 72192698` with a CourtListener docket ID.
+2. DocketMind fetches the case name from the RSS feed and creates a database record.
+3. The scheduler immediately backfills all existing docket entries and starts polling for new ones.
+4. For each entry, the text content is embedded into the vector index. If PDFs are attached, they are downloaded, split into pages, and embedded separately.
+5. When a user runs `/ask What motions have been filed?`, the query hits the vector store, retrieves the most relevant chunks, and an LLM synthesizes an answer with source citations.
 
 ## License
 
-MIT
+[MIT](LICENSE)
