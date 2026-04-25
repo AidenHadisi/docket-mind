@@ -1,11 +1,12 @@
-"""Tests for Bot orchestrator and dispatch behaviour."""
+"""Tests for dispatch routing and error handling."""
 
 from collections.abc import AsyncIterator
 
 import pytest
 
-from docketmind.bot import Bot
+from docketmind.__main__ import _run_platform, dispatch
 from docketmind.commands import (
+    CommandHandler,
     CommandSpec,
     CooldownError,
     PermissionDeniedError,
@@ -59,23 +60,29 @@ class DummyPlatform(Platform):
         self.disconnected = True
 
 
+def _handlers_from_specs(specs: list[CommandSpec]) -> dict[str, CommandHandler]:
+    """Build a name -> handler dict from CommandSpec objects."""
+    return {s.name: s.handler for s in specs}
+
+
 # ------------------------------------------------------------------
-# Bot.dispatch routing
+# dispatch routing
 # ------------------------------------------------------------------
 
 
 async def test_dispatch_routes_to_registered_handler():
-    bot = Bot()
+    """Dispatch should invoke the correct handler and send the response."""
     platform = DummyPlatform()
     called_with: list[PlatformEvent] = []
 
     async def handler(event: PlatformEvent) -> BotResponse:
+        """Echo handler."""
         called_with.append(event)
         return BotResponse(text="pong")
 
-    bot.register_commands([CommandSpec(name="ping", description="Ping", handler=handler)])
+    handlers = _handlers_from_specs([CommandSpec(name="ping", description="Ping", handler=handler)])
     evt = _event(cmd="ping")
-    await bot.dispatch(evt, platform)
+    await dispatch(evt, platform, handlers)
 
     assert len(called_with) == 1
     assert called_with[0] is evt
@@ -84,10 +91,9 @@ async def test_dispatch_routes_to_registered_handler():
 
 
 async def test_dispatch_returns_ephemeral_error_for_unknown_command():
-    bot = Bot()
+    """An unregistered command should produce an ephemeral error."""
     platform = DummyPlatform()
-
-    await bot.dispatch(_event(cmd="nope"), platform)
+    await dispatch(_event(cmd="nope"), platform, {})
 
     assert len(platform.sent) == 1
     response = platform.sent[0][1]
@@ -96,14 +102,17 @@ async def test_dispatch_returns_ephemeral_error_for_unknown_command():
 
 
 async def test_dispatch_sends_error_on_handler_exception():
-    bot = Bot()
+    """An unhandled handler exception should produce an ephemeral internal error."""
     platform = DummyPlatform()
 
     async def bad_handler(event: PlatformEvent) -> BotResponse:
+        """Always raises."""
         raise RuntimeError("boom")
 
-    bot.register_commands([CommandSpec(name="fail", description="Fail", handler=bad_handler)])
-    await bot.dispatch(_event(cmd="fail"), platform)
+    handlers = _handlers_from_specs(
+        [CommandSpec(name="fail", description="Fail", handler=bad_handler)]
+    )
+    await dispatch(_event(cmd="fail"), platform, handlers)
 
     assert len(platform.sent) == 1
     assert "internal error" in platform.sent[0][1].text.lower()
@@ -116,8 +125,11 @@ async def test_dispatch_sends_error_on_handler_exception():
 
 
 async def test_cooldown_allows_first_call():
+    """First invocation within cooldown window should succeed."""
+
     @command(name="_test_cd1", description="t", cooldown=60.0)
     async def cmd(event: PlatformEvent) -> BotResponse:
+        """Cooldown test handler."""
         return BotResponse(text="ok")
 
     response = await cmd(_event(user_id="u1"))
@@ -125,8 +137,11 @@ async def test_cooldown_allows_first_call():
 
 
 async def test_cooldown_blocks_second_call_within_window():
+    """Second call from the same user within the cooldown window should raise."""
+
     @command(name="_test_cd2", description="t", cooldown=60.0)
     async def cmd(event: PlatformEvent) -> BotResponse:
+        """Cooldown test handler."""
         return BotResponse(text="ok")
 
     await cmd(_event(user_id="u2"))
@@ -142,6 +157,7 @@ async def test_cooldown_is_per_user_not_global():
 
     @command(name="_test_cd3", description="t", cooldown=60.0)
     async def cmd(event: PlatformEvent) -> BotResponse:
+        """Cooldown test handler."""
         return BotResponse(text="ok")
 
     await cmd(_event(user_id="userA"))
@@ -150,17 +166,20 @@ async def test_cooldown_is_per_user_not_global():
 
 
 async def test_cooldown_wrapped_in_dispatch_returns_error_response():
-    bot = Bot()
+    """CooldownError from a handler should be turned into an ephemeral message."""
     platform = DummyPlatform()
 
     @command(name="_test_cd4", description="t", cooldown=60.0)
     async def cmd(event: PlatformEvent) -> BotResponse:
+        """Cooldown test handler."""
         return BotResponse(text="ok")
 
-    bot.register_commands([cmd.__command_spec__])  # type: ignore[attr-defined]
+    handlers = _handlers_from_specs(
+        [cmd.__command_spec__]  # type: ignore[attr-defined]
+    )
 
-    await bot.dispatch(_event(cmd="_test_cd4", user_id="u3"), platform)
-    await bot.dispatch(_event(cmd="_test_cd4", user_id="u3"), platform)
+    await dispatch(_event(cmd="_test_cd4", user_id="u3"), platform, handlers)
+    await dispatch(_event(cmd="_test_cd4", user_id="u3"), platform, handlers)
 
     assert len(platform.sent) == 2
     first, second = platform.sent
@@ -175,8 +194,11 @@ async def test_cooldown_wrapped_in_dispatch_returns_error_response():
 
 
 async def test_permission_blocks_user_on_admin_command():
+    """A USER-level caller should be rejected for ADMIN commands."""
+
     @command(name="_test_perm1", description="t", permission=PermissionLevel.ADMIN)
     async def admin_cmd(event: PlatformEvent) -> BotResponse:
+        """Admin-only handler."""
         return BotResponse(text="secret")
 
     with pytest.raises(PermissionDeniedError):
@@ -184,8 +206,11 @@ async def test_permission_blocks_user_on_admin_command():
 
 
 async def test_permission_allows_admin():
+    """An ADMIN-level caller should pass the permission check."""
+
     @command(name="_test_perm2", description="t", permission=PermissionLevel.ADMIN)
     async def admin_cmd(event: PlatformEvent) -> BotResponse:
+        """Admin-only handler."""
         return BotResponse(text="secret")
 
     response = await admin_cmd(_event(permission_level=PermissionLevel.ADMIN))
@@ -193,15 +218,22 @@ async def test_permission_allows_admin():
 
 
 async def test_permission_wrapped_in_dispatch_returns_error_response():
-    bot = Bot()
+    """PermissionDeniedError should be turned into an ephemeral message."""
     platform = DummyPlatform()
 
     @command(name="_test_perm3", description="t", permission=PermissionLevel.ADMIN)
     async def admin_cmd(event: PlatformEvent) -> BotResponse:
+        """Admin-only handler."""
         return BotResponse(text="secret")
 
-    bot.register_commands([admin_cmd.__command_spec__])  # type: ignore[attr-defined]
-    await bot.dispatch(_event(cmd="_test_perm3", permission_level=PermissionLevel.USER), platform)
+    handlers = _handlers_from_specs(
+        [admin_cmd.__command_spec__]  # type: ignore[attr-defined]
+    )
+    await dispatch(
+        _event(cmd="_test_perm3", permission_level=PermissionLevel.USER),
+        platform,
+        handlers,
+    )
 
     assert len(platform.sent) == 1
     assert "permission" in platform.sent[0][1].text.lower()
@@ -209,69 +241,25 @@ async def test_permission_wrapped_in_dispatch_returns_error_response():
 
 
 # ------------------------------------------------------------------
-# Bot platform + command registration
+# Event loop integration
 # ------------------------------------------------------------------
 
 
-def test_register_platform_stores_instance():
-    bot = Bot()
-    p = DummyPlatform()
-    bot.register_platform(p)
-    assert bot._platforms[0] is p
-
-
-def test_register_commands_bulk_registers_handlers():
-    bot = Bot()
-
-    async def handler_a(event: PlatformEvent) -> BotResponse:
-        return BotResponse(text="a")
-
-    async def handler_b(event: PlatformEvent) -> BotResponse:
-        return BotResponse(text="b")
-
-    specs = [
-        CommandSpec(name="alpha", description="Alpha cmd", handler=handler_a),
-        CommandSpec(name="beta", description="Beta cmd", handler=handler_b),
-    ]
-    bot.register_commands(specs)
-
-    assert bot._handlers["alpha"] is handler_a
-    assert bot._handlers["beta"] is handler_b
-    assert len(bot._handlers) == 2
-
-
-async def test_register_commands_handlers_are_dispatchable():
-    bot = Bot()
-    platform = DummyPlatform()
-
-    async def pong(event: PlatformEvent) -> BotResponse:
-        return BotResponse(text="pong")
-
-    bot.register_commands([CommandSpec(name="ping", description="Ping", handler=pong)])
-    await bot.dispatch(_event(cmd="ping"), platform)
-
-    assert len(platform.sent) == 1
-    assert platform.sent[0][1].text == "pong"
-
-
-async def test_run_drives_event_loop():
-    """Bot.run() should process all events from a DummyPlatform."""
-    bot = Bot()
+async def test_run_platform_drives_event_loop():
+    """_run_platform should process all events and dispatch each one."""
     events = [
         _event(cmd="ping", user_id="u1"),
         _event(cmd="ping", user_id="u2"),
         _event(cmd="ping", user_id="u3"),
     ]
     platform = DummyPlatform(events_to_emit=events)
-    bot.register_platform(platform)
 
     async def ping(event: PlatformEvent) -> BotResponse:
+        """Ping handler."""
         return BotResponse(text="pong")
 
-    bot.register_commands([CommandSpec(name="ping", description="Ping", handler=ping)])
-    await bot.run()
+    handlers = _handlers_from_specs([CommandSpec(name="ping", description="Ping", handler=ping)])
+    await _run_platform(platform, handlers)
 
-    assert platform.connected is True
-    assert platform.disconnected is True
     assert len(platform.sent) == 3
     assert all(r.text == "pong" for _, r in platform.sent)

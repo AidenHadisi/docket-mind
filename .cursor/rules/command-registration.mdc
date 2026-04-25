@@ -1,0 +1,52 @@
+---
+description: How bot commands are declared and registered in DocketMind
+alwaysApply: true
+---
+
+# Command Registration
+
+## Single decorator pattern
+
+Every command is a standalone `async` function decorated with `@command(...)`. The decorator carries all metadata **and** enforces permissions and cooldowns automatically. Never add separate permission or cooldown decorators.
+
+```python
+from docketmind.commands import CommandParam, command
+from docketmind.platforms import BotResponse, PlatformEvent
+
+@command(
+    name="ask",
+    description="Ask a question about a tracked case",
+    params=[
+        CommandParam("question", str, "The question to ask"),
+        CommandParam("case_id", str, "Scope to a specific case ID", required=False),
+    ],
+    cooldown=5.0,
+)
+async def ask(event: PlatformEvent) -> BotResponse:
+    """Answer a question using RAG, optionally scoped to a case."""
+    ...
+```
+
+## Adding a new command
+
+1. Create a new file in `docketmind/commands/` (e.g. `sync.py`).
+2. Decorate the handler with `@command(...)` as shown above.
+3. Import the new module at the bottom of `docketmind/commands/__init__.py` — this triggers registration.
+
+```python
+# docketmind/commands/__init__.py  (bottom of file)
+import docketmind.commands.sync  # noqa: E402, F401
+```
+
+No other wiring is needed; `get_specs()` picks up the new command automatically and platform adapters read from it.
+
+## Handler contract
+
+- **Input**: always `PlatformEvent` — access arguments via `event.args["param_name"]`.
+- **Output**: always `BotResponse` — set `ephemeral=True` for user-only messages.
+- **Errors**: raise `PermissionDeniedError` or `CooldownError` from the commands package; the `dispatch()` function in `__main__` translates these into user-facing messages.
+
+## Do not
+
+- Create command specs manually or maintain a separate registry list.
+- Use `discord.py`-specific decorators (`@tree.command`, `@app_commands.describe`) in command handlers — the Discord adapter reads `CommandSpec` metadata and builds native commands itself.
