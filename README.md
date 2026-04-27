@@ -109,7 +109,7 @@ You need credentials for **at least one platform** (Discord or Slack), plus LLM 
 |----------|---------|-------------|
 | `DISCORD_GUILD_ID` | *(unset)* | Server ID for instant slash-command sync during development |
 | `LLM_PROVIDER` | `openai` | LLM provider: `openai`, `anthropic`, or `mock` |
-| `LLM_MODEL` | `gpt-5.4-mini` | Model name passed to the LLM provider |
+| `LLM_MODEL` | `gpt-5.4` | Model name passed to the LLM provider |
 | `EMBED_PROVIDER` | `openai` | Embedding provider: `openai` or `mock` |
 | `EMBED_MODEL` | `text-embedding-3-small` | Model name for embeddings |
 | `DATA_DIR` | `data` | Root directory for the SQLite database, vector index, and downloaded PDFs |
