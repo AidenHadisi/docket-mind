@@ -14,7 +14,13 @@ from loguru import logger
 from docketmind.chat import SourceChunk
 from docketmind.commands import CommandSpec
 from docketmind.configure import settings
-from docketmind.platforms import BotResponse, PermissionLevel, Platform, PlatformEvent
+from docketmind.platforms import (
+    BotResponse,
+    PermissionLevel,
+    Platform,
+    PlatformEvent,
+    PlatformNotConfigured,
+)
 
 _DISCORD_MAX_LENGTH = 2000
 _EMBED_DESC_MAX = 4096
@@ -71,6 +77,8 @@ class DiscordPlatform(Platform):
 
     def __init__(self) -> None:
         """Initialise the Discord client, command tree, and internal queues."""
+        if not settings.discord_bot_token:
+            raise PlatformNotConfigured("discord: DISCORD_BOT_TOKEN not set")
         intents = discord.Intents.default()
         self._client: ext_commands.Bot = ext_commands.Bot(
             command_prefix="!",  # unused but required by ext.commands.Bot

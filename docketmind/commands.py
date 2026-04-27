@@ -1,33 +1,77 @@
-"""Case management commands: add, remove, and list tracked cases."""
+"""Bot commands: types, handlers, and the COMMANDS registry."""
 
 import shutil
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import NamedTuple
 
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
 from docketmind import schedule, store
-from docketmind.commands import CommandParam, command
+from docketmind.chat import query
 from docketmind.configure import settings
 from docketmind.index import delete_case_vectors
 from docketmind.ingest import fetch_case_metadata
 from docketmind.platforms import BotResponse, PermissionLevel, PlatformEvent
 
-
-def _fmt_time(dt: datetime | None) -> str:
-    """Format a datetime as a human-readable string, or 'never' if None."""
-    return dt.strftime("%Y-%m-%d %H:%M UTC") if dt else "never"
+type CommandHandler = Callable[[PlatformEvent], Awaitable[BotResponse]]
 
 
-@command(
-    name="add_case",
-    description="Start tracking a CourtListener case",
-    params=[
-        CommandParam("court_listener_id", str, "CourtListener docket ID (numeric)"),
-    ],
-    permission=PermissionLevel.ADMIN,
-    ephemeral_defer=True,
-)
+class CommandParam(NamedTuple):
+    """One parameter accepted by a bot command."""
+
+    name: str
+    type: type
+    description: str
+    required: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class CommandSpec:
+    """Declarative definition of a bot command.
+
+    Platform adapters consume these to build native UI elements (e.g. Discord
+    slash commands). The dispatch loop uses them to enforce permissions and
+    cooldowns before invoking the handler.
+    """
+
+    name: str
+    description: str
+    handler: CommandHandler
+    params: list[CommandParam] = field(default_factory=list)
+    cooldown: float = 0.0
+    permission: PermissionLevel = PermissionLevel.USER
+    ephemeral_defer: bool = False
+
+
+class PermissionDeniedError(Exception):
+    """Raised when a command requires a higher permission level than the caller has."""
+
+
+class CooldownError(Exception):
+    """Raised when a command is invoked before its cooldown expires."""
+
+    def __init__(self, retry_after: float) -> None:
+        """Initialise with the number of seconds remaining on the cooldown."""
+        self.retry_after = retry_after
+        super().__init__(f"Command on cooldown. Retry after {retry_after:.1f}s.")
+
+
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
+
+
+async def ask(event: PlatformEvent) -> BotResponse:
+    """Answer a question using RAG, optionally scoped to a case."""
+    question: str = event.args["question"]
+    case_id: str | None = event.args.get("case_id")
+    result = await query(question, case_id=case_id)
+    return BotResponse(text=result.answer, citations=result.sources, question=question)
+
+
 async def add_case(event: PlatformEvent) -> BotResponse:
     """Register a new case and trigger an immediate backfill sync.
 
@@ -69,15 +113,6 @@ async def add_case(event: PlatformEvent) -> BotResponse:
     return BotResponse(text=f"Now tracking **{name}** (`{court_listener_id}`).")
 
 
-@command(
-    name="remove_case",
-    description="Stop tracking a CourtListener case",
-    params=[
-        CommandParam("court_listener_id", str, "CourtListener docket ID to remove"),
-    ],
-    permission=PermissionLevel.ADMIN,
-    ephemeral_defer=True,
-)
 async def remove_case(event: PlatformEvent) -> BotResponse:
     """Remove a tracked case and its scheduled sync job.
 
@@ -112,10 +147,11 @@ async def remove_case(event: PlatformEvent) -> BotResponse:
     )
 
 
-@command(
-    name="list_cases",
-    description="List all currently tracked cases",
-)
+def _fmt_time(dt: datetime | None) -> str:
+    """Format a datetime as a human-readable string, or 'never' if None."""
+    return dt.strftime("%Y-%m-%d %H:%M UTC") if dt else "never"
+
+
 async def list_cases(event: PlatformEvent) -> BotResponse:
     """List all currently tracked cases with their last-synced time."""
     async with store.async_session() as session:
@@ -129,3 +165,46 @@ async def list_cases(event: PlatformEvent) -> BotResponse:
         for c in cases
     ]
     return BotResponse(text="**Tracked Cases:**\n" + "\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Command registry
+# ---------------------------------------------------------------------------
+
+COMMANDS: list[CommandSpec] = [
+    CommandSpec(
+        name="ask",
+        description="Ask a question about a tracked case",
+        handler=ask,
+        params=[
+            CommandParam("question", str, "The question to ask"),
+            CommandParam("case_id", str, "Scope to a specific case ID", required=False),
+        ],
+        cooldown=5.0,
+    ),
+    CommandSpec(
+        name="add_case",
+        description="Start tracking a CourtListener case",
+        handler=add_case,
+        params=[
+            CommandParam("court_listener_id", str, "CourtListener docket ID (numeric)"),
+        ],
+        permission=PermissionLevel.ADMIN,
+        ephemeral_defer=True,
+    ),
+    CommandSpec(
+        name="remove_case",
+        description="Stop tracking a CourtListener case",
+        handler=remove_case,
+        params=[
+            CommandParam("court_listener_id", str, "CourtListener docket ID to remove"),
+        ],
+        permission=PermissionLevel.ADMIN,
+        ephemeral_defer=True,
+    ),
+    CommandSpec(
+        name="list_cases",
+        description="List all currently tracked cases",
+        handler=list_cases,
+    ),
+]

@@ -22,6 +22,7 @@ dependencies = [
     "stamina>=24.2",
     "loguru>=0.7",
     "cachetools>=5.3",
+    "slack-bolt>=1.28.0",
 ]
 
 [dependency-groups]

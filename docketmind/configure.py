@@ -21,8 +21,12 @@ class Config(BaseConfig):
     )
 
     # Discord
-    discord_bot_token: str
+    discord_bot_token: str = ""
     discord_guild_id: int | None = None  # set for instant guild sync in dev; None = global sync
+
+    # Slack (socket mode)
+    slack_bot_token: str = ""  # xoxb-...
+    slack_app_token: str = ""  # xapp-... (required for socket mode)
 
     # LLM
     llm_provider: Literal["openai", "anthropic", "mock"] = "openai"

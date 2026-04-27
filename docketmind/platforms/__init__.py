@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
 from pydantic import BaseModel, Field
 
 from docketmind.chat import SourceChunk
@@ -58,6 +59,10 @@ class BotResponse(BaseModel):
     question: str | None = None
 
 
+class PlatformNotConfigured(Exception):
+    """Raised by a platform constructor when its required config is missing."""
+
+
 class Platform(ABC):
     """Abstract interface every messaging platform adapter must implement.
 
@@ -98,3 +103,23 @@ class Platform(ABC):
         Override in adapters that need to translate specs into native UI
         elements (e.g. Discord slash commands). The default is a no-op.
         """
+
+
+def create_platforms() -> list[Platform]:
+    """Instantiate all platform adapters whose config is present.
+
+    Each adapter raises PlatformNotConfigured in its constructor if the
+    required credentials are missing. Skipped platforms are logged.
+    """
+    from docketmind.platforms.discord import DiscordPlatform
+    from docketmind.platforms.slack import SlackPlatform
+
+    adapter_classes: list[type[Platform]] = [DiscordPlatform, SlackPlatform]
+
+    platforms: list[Platform] = []
+    for cls in adapter_classes:
+        try:
+            platforms.append(cls())
+        except PlatformNotConfigured as exc:
+            logger.info("Skipping platform: {}", exc)
+    return platforms

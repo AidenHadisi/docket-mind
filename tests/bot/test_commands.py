@@ -1,16 +1,15 @@
-"""Tests for platform-agnostic command handlers."""
+"""Tests for command handler functions."""
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import docketmind.store as db_module
+from docketmind.commands import ask
 from docketmind.platforms import PermissionLevel, PlatformEvent
-from docketmind.store import Case
 
 
 @pytest.fixture(autouse=True)
-async def _db(in_memory_db):
+async def _db_fixture(in_memory_db):
     """Auto-use the shared in_memory_db fixture for every test in this module."""
 
 
@@ -31,48 +30,33 @@ def _event(
     )
 
 
-async def _insert_case(court_listener_id: str = "12345") -> Case:
-    """Persist a Case to the in-memory DB and return the refreshed instance."""
-    async with db_module.async_session() as session:
-        case = Case(
-            court_listener_id=court_listener_id,
-            name="Smith v. Jones",
-        )
-        session.add(case)
-        await session.commit()
-        await session.refresh(case)
-    return case
-
-
 async def test_ask_calls_query_when_no_case_id(monkeypatch):
-    import docketmind.commands.ask as ask_module
-    from docketmind.commands.ask import ask
+    import docketmind.commands as cmd_module
 
     mock_result = MagicMock()
     mock_result.answer = "The answer."
     mock_result.sources = []
-    monkeypatch.setattr(ask_module, "query", AsyncMock(return_value=mock_result))
+    mock_query = AsyncMock(return_value=mock_result)
+    monkeypatch.setattr(cmd_module, "query", mock_query)
 
-    response = await ask.__wrapped__(_event(args={"question": "What happened?", "case_id": None}))  # type: ignore[attr-defined]
+    response = await ask(_event(args={"question": "What happened?", "case_id": None}))
 
-    ask_module.query.assert_awaited_once_with("What happened?", case_id=None)  # type: ignore[attr-defined]
+    mock_query.assert_awaited_once_with("What happened?", case_id=None)
     assert response.text == "The answer."
     assert response.question == "What happened?"
 
 
 async def test_ask_passes_case_id_to_query(monkeypatch):
-    import docketmind.commands.ask as ask_module
-    from docketmind.commands.ask import ask
+    import docketmind.commands as cmd_module
 
     mock_result = MagicMock()
     mock_result.answer = "Scoped answer."
     mock_result.sources = []
-    monkeypatch.setattr(ask_module, "query", AsyncMock(return_value=mock_result))
+    mock_query = AsyncMock(return_value=mock_result)
+    monkeypatch.setattr(cmd_module, "query", mock_query)
 
-    response = await ask.__wrapped__(  # type: ignore[attr-defined]
-        _event(args={"question": "Any updates?", "case_id": "case-abc"})
-    )
+    response = await ask(_event(args={"question": "Any updates?", "case_id": "case-abc"}))
 
-    ask_module.query.assert_awaited_once_with("Any updates?", case_id="case-abc")  # type: ignore[attr-defined]
+    mock_query.assert_awaited_once_with("Any updates?", case_id="case-abc")
     assert response.text == "Scoped answer."
     assert response.question == "Any updates?"
