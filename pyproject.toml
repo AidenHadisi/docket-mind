@@ -46,6 +46,12 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+# Prompt strings are intentionally unwrapped: wrapping changes the rendered
+# message (hard newlines) or fragments the content into brittle implicit
+# concatenations. The line-length rule does not apply here.
+"docketmind/prompts.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["docketmind"]
 

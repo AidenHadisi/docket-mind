@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from docketmind.configure import settings
 from docketmind.index import index
+from docketmind.prompts import DOCKET_QA_TEMPLATE, DOCKET_REFINE_TEMPLATE
 
 
 class SourceChunk(BaseModel):
@@ -38,7 +39,12 @@ async def query(question: str, case_id: str | None = None) -> QueryResult:
     if case_id:
         filters = MetadataFilters(filters=[MetadataFilter(key="case_id", value=case_id)])
 
-    engine = index.as_query_engine(filters=filters, similarity_top_k=settings.similarity_top_k)
+    engine = index.as_query_engine(
+        filters=filters,
+        similarity_top_k=settings.similarity_top_k,
+        text_qa_template=DOCKET_QA_TEMPLATE,
+        refine_template=DOCKET_REFINE_TEMPLATE,
+    )
     response = await engine.aquery(question)
 
     sources = [

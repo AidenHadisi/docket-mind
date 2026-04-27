@@ -9,6 +9,7 @@ from llama_index.core.embeddings import BaseEmbedding, MockEmbedding
 from llama_index.core.llms import LLM
 
 from docketmind.configure import settings
+from docketmind.prompts import BASE_SYSTEM_PROMPT
 
 
 def _build_llm() -> LLM:
@@ -24,6 +25,7 @@ def _build_llm() -> LLM:
             return OpenAI(
                 model=settings.llm_model,
                 api_key=settings.llm_api_key,
+                system_prompt=BASE_SYSTEM_PROMPT,
                 **settings.llm_extra,
             )
         case "anthropic":
@@ -32,6 +34,7 @@ def _build_llm() -> LLM:
             return Anthropic(
                 model=settings.llm_model,
                 api_key=settings.llm_api_key,
+                system_prompt=BASE_SYSTEM_PROMPT,
                 **settings.llm_extra,
             )
 
