@@ -134,7 +134,7 @@ async def remove_case(event: PlatformEvent) -> BotResponse:
         await session.commit()
 
     schedule.remove_case(case_id)
-    delete_case_vectors(case_id)
+    await delete_case_vectors(case_id)
 
     pdf_dir = settings.pdfs_path / court_listener_id
     if pdf_dir.is_dir():
