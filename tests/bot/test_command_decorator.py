@@ -34,7 +34,7 @@ def test_known_specs_present():
 
 def test_ask_spec_metadata():
     spec = next(s for s in COMMANDS if s.name == "ask")
-    assert spec.cooldown == 5.0
+    assert spec.cooldown == 30.0
     assert spec.permission == PermissionLevel.USER
     param_names = [p.name for p in spec.params]
     assert "question" in param_names

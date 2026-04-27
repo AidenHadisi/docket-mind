@@ -180,7 +180,7 @@ COMMANDS: list[CommandSpec] = [
             CommandParam("question", str, "The question to ask"),
             CommandParam("case_id", str, "Scope to a specific case ID", required=False),
         ],
-        cooldown=5.0,
+        cooldown=30.0,
     ),
     CommandSpec(
         name="add_case",
