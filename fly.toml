@@ -6,25 +6,24 @@
 # All persistent state (SQLite DB, LlamaIndex vector store, cached PDFs)
 # lives under /data, which is backed by a Fly volume.
 
-app = "docketmind"
-primary_region = "iad"
+app = 'docketmind'
+primary_region = 'iad'
 
 [build]
 
 [env]
-  DATA_DIR = "/data"
-  LOG_LEVEL = "INFO"
+  DATA_DIR = '/data'
+  LOG_LEVEL = 'INFO'
 
 [[mounts]]
-  source = "data"
-  destination = "/data"
+  source = 'data'
+  destination = '/data'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "256mb"
+  size = 'shared-cpu-1x'
+  memory = '512mb'
 
 [deploy]
-  # Run Alembic migrations against the volume before swapping in the new release.
-  # Fails closed: if migrations fail, the deploy is aborted.
-  release_command = "alembic upgrade head"
-  strategy = "immediate"
+  # Migrations run on app startup (see Dockerfile CMD), not as a release_command,
+  # because Fly's release_command machines don't mount volumes.
+  strategy = 'immediate'

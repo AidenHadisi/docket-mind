@@ -210,16 +210,13 @@ DocketMind is a long-running background process with no public HTTP endpoint (Di
    fly volumes create data --region iad --size 1
    ```
 
-4. **Set secrets**. Provide whichever platform tokens you use:
+4. **Set secrets** by importing your local `.env`. Comments and blanks are skipped, and tokens never hit your shell history:
 
    ```bash
-   fly secrets set \
-     LLM_API_KEY=sk-... \
-     EMBED_API_KEY=sk-... \
-     DISCORD_BOT_TOKEN=... \
-     SLACK_BOT_TOKEN=xoxb-... \
-     SLACK_APP_TOKEN=xapp-...
+   fly secrets import < .env
    ```
+
+   Verify with `fly secrets list`.
 
 ### Deploy
 
@@ -227,7 +224,7 @@ DocketMind is a long-running background process with no public HTTP endpoint (Di
 fly deploy
 ```
 
-Each deploy builds the Docker image, runs `alembic upgrade head` against the volume as a release command (deploy aborts if migrations fail), and rolls out the new machine.
+Each deploy builds the Docker image and rolls out the new machine. Alembic migrations run on app startup (idempotent — already-applied migrations are no-ops). They run inside the app container so they have access to the mounted `/data` volume.
 
 ### Operate
 

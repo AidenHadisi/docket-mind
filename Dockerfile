@@ -44,4 +44,8 @@ RUN useradd --create-home --shell /bin/bash docketmind \
 
 USER docketmind
 
-CMD ["python", "-m", "docketmind"]
+# Run Alembic migrations against the mounted volume on startup, then launch
+# the app. We can't use Fly's release_command because release_command
+# machines don't mount volumes — so migrations would run against an empty
+# throwaway filesystem. `exec` replaces the shell so SIGTERM reaches Python.
+CMD ["sh", "-c", "alembic upgrade head && exec python -m docketmind"]
