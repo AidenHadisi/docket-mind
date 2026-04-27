@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# App state — never bake into the image
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Local dev / secrets
+.env
+.env.*
+!.env.example
+
+# VCS & editor
+.git/
+.gitignore
+.gitattributes
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Tooling / IDE configs not needed at runtime
+.claude/
+.cursor/
+.pre-commit-config.yaml
+
+# Docs and tests are not needed in the image
+docs/
+tests/
+README.md
+LICENSE
+
+# Build artefacts
+build/
+dist/
+*.egg-info/
+
+# OS junk
+.DS_Store
+Thumbs.db

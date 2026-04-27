@@ -1,0 +1,30 @@
+# DocketMind — Fly.io configuration
+#
+# This is a background worker (no HTTP ingress). Discord uses websockets
+# and Slack uses socket mode, so no public IP or [http_service] is needed.
+#
+# All persistent state (SQLite DB, LlamaIndex vector store, cached PDFs)
+# lives under /data, which is backed by a Fly volume.
+
+app = "docketmind"
+primary_region = "iad"
+
+[build]
+
+[env]
+  DATA_DIR = "/data"
+  LOG_LEVEL = "INFO"
+
+[[mounts]]
+  source = "data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[deploy]
+  # Run Alembic migrations against the volume before swapping in the new release.
+  # Fails closed: if migrations fail, the deploy is aborted.
+  release_command = "alembic upgrade head"
+  strategy = "immediate"

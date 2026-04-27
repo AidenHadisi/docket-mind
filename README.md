@@ -14,9 +14,9 @@ DocketMind monitors federal lawsuits via [CourtListener](https://www.courtlisten
 - **Automatic polling** -- RSS feeds are checked on a configurable interval (default: 10 minutes)
 - **PDF ingestion** -- attached court documents are downloaded, chunked, and embedded
 - **RAG-powered Q&A** -- ask questions and get answers grounded in actual filings, with citations
-- **Discord slash commands** -- admin-gated case management, per-user cooldowns
-- **Async everything** -- built on asyncio end-to-end (discord.py, httpx, SQLAlchemy, APScheduler)
-- **Extensible platform layer** -- Discord is shipped; the adapter pattern makes adding Slack or Telegram straightforward
+- **Discord and Slack support** -- admin-gated case management, per-user cooldowns; run either or both side-by-side
+- **Async everything** -- built on asyncio end-to-end (discord.py, slack-bolt, httpx, SQLAlchemy, APScheduler)
+- **Extensible platform layer** -- a clean Platform adapter contract; auto-discovery of configured adapters at startup
 
 ## Architecture
 
@@ -88,11 +88,20 @@ All configuration is via environment variables (or a `.env` file). See [`.env.ex
 
 ### Required
 
+You need credentials for **at least one platform** (Discord or Slack), plus LLM and embedding API keys.
+
+| Variable | Description |
+|----------|-------------|
+| `LLM_API_KEY` | API key for the LLM provider (OpenAI by default) |
+| `EMBED_API_KEY` | API key for the embedding provider (same key if using OpenAI for both) |
+
+### Platform credentials (set at least one)
+
 | Variable | Description |
 |----------|-------------|
 | `DISCORD_BOT_TOKEN` | Discord bot token |
-| `LLM_API_KEY` | API key for the LLM provider (OpenAI by default) |
-| `EMBED_API_KEY` | API key for the embedding provider (same key if using OpenAI for both) |
+| `SLACK_BOT_TOKEN` | Slack bot token (`xoxb-...`) |
+| `SLACK_APP_TOKEN` | Slack app-level token (`xapp-...`); required for socket mode alongside `SLACK_BOT_TOKEN` |
 
 ### Optional
 
@@ -143,20 +152,18 @@ Tests use mock providers for the LLM and embeddings, so no API keys are needed t
 ```
 docketmind/
 ├── __init__.py          # LlamaIndex LLM and embedding configuration
-├── __main__.py          # Application entry point and event loop
+├── __main__.py          # Application entry point, dispatch, and event loop
 ├── configure.py         # Pydantic Settings (loads .env)
 ├── store.py             # SQLAlchemy async models and queries
 ├── ingest.py            # RSS parsing, PDF download, sync pipeline
 ├── index.py             # LlamaIndex vector store (upsert, delete, persist)
 ├── chat.py              # RAG query engine and response formatting
 ├── schedule.py          # APScheduler job management (per-case polling)
-├── commands/
-│   ├── __init__.py      # @command decorator, registry, cooldowns
-│   ├── ask.py           # /ask — RAG Q&A
-│   └── cases.py         # /add_case, /remove_case, /list_cases
+├── commands.py          # CommandSpec, exceptions, handlers, COMMANDS registry
 └── platforms/
-    ├── __init__.py      # Abstract Platform, PlatformEvent, BotResponse
-    └── discord.py       # Discord adapter (slash commands, message formatting)
+    ├── __init__.py      # Abstract Platform, BotResponse, create_platforms()
+    ├── discord.py       # Discord adapter (slash commands, embeds)
+    └── slack.py         # Slack adapter (socket mode, Block Kit)
 ```
 
 ### Data directory (gitignored)
@@ -175,6 +182,64 @@ data/
 3. The scheduler immediately backfills all existing docket entries and starts polling for new ones.
 4. For each entry, the text content is embedded into the vector index. If PDFs are attached, they are downloaded, split into pages, and embedded separately.
 5. When a user runs `/ask What motions have been filed?`, the query hits the vector store, retrieves the most relevant chunks, and an LLM synthesizes an answer with source citations.
+
+## Deployment
+
+DocketMind is a long-running background process with no public HTTP endpoint (Discord uses websockets, Slack uses socket mode). It needs a small persistent disk for its SQLite database, vector index, and cached PDFs. The included [`Dockerfile`](Dockerfile) and [`fly.toml`](fly.toml) target [Fly.io](https://fly.io), which costs roughly $2–5/month for this workload.
+
+### One-time setup
+
+1. **Install flyctl** and log in:
+
+   ```bash
+   brew install flyctl
+   fly auth signup        # or: fly auth login
+   ```
+
+2. **Create the app** (uses the existing `fly.toml`, no deploy yet):
+
+   ```bash
+   fly launch --no-deploy --copy-config --name docketmind --region iad
+   ```
+
+   If `docketmind` is taken, pick a different name and update `app =` in `fly.toml`.
+
+3. **Create the persistent volume** (1 GB is plenty to start):
+
+   ```bash
+   fly volumes create data --region iad --size 1
+   ```
+
+4. **Set secrets**. Provide whichever platform tokens you use:
+
+   ```bash
+   fly secrets set \
+     LLM_API_KEY=sk-... \
+     EMBED_API_KEY=sk-... \
+     DISCORD_BOT_TOKEN=... \
+     SLACK_BOT_TOKEN=xoxb-... \
+     SLACK_APP_TOKEN=xapp-...
+   ```
+
+### Deploy
+
+```bash
+fly deploy
+```
+
+Each deploy builds the Docker image, runs `alembic upgrade head` against the volume as a release command (deploy aborts if migrations fail), and rolls out the new machine.
+
+### Operate
+
+```bash
+fly logs                  # tail logs
+fly status                # machine status, last deploy, volume info
+fly ssh console           # shell into the running machine
+fly secrets list          # see configured secrets (values are hidden)
+fly volumes list          # check disk usage
+```
+
+To grow the volume later: `fly volumes extend <volume-id> --size 5`.
 
 ## License
 
