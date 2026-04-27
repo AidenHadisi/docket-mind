@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     String,
     UniqueConstraint,
+    event,
     func,
     select,
     text,
@@ -22,6 +23,28 @@ engine = create_async_engine(
     f"sqlite+aiosqlite:///{settings.db_path}",
     echo=False,
 )
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _configure_sqlite(dbapi_connection, _connection_record):
+    """Apply SQLite PRAGMAs that prevent 'database is locked' under concurrency.
+
+    - WAL lets readers run while a single writer commits, eliminating most
+      reader/writer contention.
+    - busy_timeout makes other writers wait briefly instead of failing
+      immediately when the write lock is held.
+    - synchronous=NORMAL is the recommended pairing with WAL.
+    - foreign_keys=ON enforces our ForeignKey constraints (off by default).
+    """
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
+
 
 async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(
     engine,
