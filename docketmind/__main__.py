@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-import docketmind  # noqa: F401 — configures LlamaIndex globals before anything else
 from docketmind.commands import CooldownError, PermissionDeniedError, get_specs
 from docketmind.platforms import BotResponse, Platform, PlatformEvent
 from docketmind.platforms.discord import DiscordPlatform
