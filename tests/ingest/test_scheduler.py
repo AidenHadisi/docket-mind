@@ -50,37 +50,6 @@ async def test_remove_case_is_safe_when_job_does_not_exist():
     remove_case("nonexistent-case")  # must not raise
 
 
-async def test_run_sync_serializes_via_index_lock(mocker):
-    """Two concurrent _run_sync calls must not overlap inside sync_case.
-
-    The fix for the docstore race depends on `index.sync_lock` serialising
-    every writer; if anyone removes the `async with` in `_run_sync` this
-    test will see overlap and fail.
-    """
-    import asyncio
-
-    from docketmind.schedule import _run_sync
-
-    overlapping = 0
-    max_overlapping = 0
-
-    async def slow_sync(case_id: str):
-        nonlocal overlapping, max_overlapping
-        overlapping += 1
-        max_overlapping = max(max_overlapping, overlapping)
-        await asyncio.sleep(0.05)
-        overlapping -= 1
-        return mocker.MagicMock(errors=[])
-
-    mocker.patch("docketmind.schedule.sync_case", side_effect=slow_sync)
-
-    await asyncio.gather(_run_sync("a"), _run_sync("b"), _run_sync("c"))
-
-    assert max_overlapping == 1, (
-        f"expected serialised sync_case execution, observed {max_overlapping} concurrent"
-    )
-
-
 async def test_start_registers_jobs_for_all_cases(in_memory_db, mocker):
     """start() should register one interval job per case in the DB."""
     from docketmind.schedule import start

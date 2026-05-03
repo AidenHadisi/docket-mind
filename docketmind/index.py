@@ -22,7 +22,7 @@ from llama_index.core.schema import BaseNode
 from llama_index.core.vector_stores.types import MetadataFilter, MetadataFilters
 from llama_index.retrievers.bm25 import BM25Retriever
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from docketmind.configure import settings
 from docketmind.prompts import DOCKET_QA_TEMPLATE, DOCKET_REFINE_TEMPLATE
@@ -64,11 +64,10 @@ def _build_index() -> VectorStoreIndex:
 
 
 def _build_pipeline() -> IngestionPipeline:
-    """Build the ingestion pipeline with chunking only.
+    """Build the chunking-only ingestion pipeline.
 
-    Per-chunk summary extraction was tried (SummaryExtractor) but had no
-    measurable retrieval benefit alongside BM25 + recency reranking and
-    cost an LLM call per chunk on every ingest.
+    SummaryExtractor was tried but added an LLM call per chunk for no
+    measurable retrieval benefit alongside BM25 + recency reranking.
     """
     return IngestionPipeline(
         transformations=[
@@ -80,16 +79,13 @@ def _build_pipeline() -> IngestionPipeline:
     )
 
 
-# Private singletons: callers go through the module-level functions below
-# rather than reaching into the index/pipeline objects directly.
 _index: VectorStoreIndex = _build_index()
 _pipeline: IngestionPipeline = _build_pipeline()
 
-# Single-writer mutex around every code path that mutates or iterates the
-# docstore. The underlying VectorStoreIndex is not thread-safe and we touch
-# it from `asyncio.to_thread` workers; without this lock, a writer thread
-# can mutate `docstore.docs` while another thread is iterating it during
-# persist, causing "dictionary changed size during iteration".
+# VectorStoreIndex is not thread-safe and is touched by many independent async
+# tasks (scheduler writers, query readers, command-driven deletes); without
+# this lock concurrent access on docstore.docs raises "dictionary changed size
+# during iteration". Every public function below that touches _index holds it.
 sync_lock = asyncio.Lock()
 
 
@@ -99,14 +95,12 @@ def _save() -> None:
 
 
 async def upsert_entry(entry: DocketEntry) -> None:
-    """Index a docket entry's text into the vector store.
+    """Index a docket entry into the vector store.
 
-    Runs the entry through the ingestion pipeline (chunking + summary extraction)
-    before inserting. Uses entry.id as the document ID for idempotent upserts.
+    The text is prefixed with a `[Filed YYYY-MM-DD - title]` header so prompts
+    can apply the prefer-most-recent rule from in-band evidence. Uses
+    entry.id as the document ID for idempotent upserts.
     """
-    # The "[Filed ...]" header gives the LLM in-band evidence of the entry
-    # date and title so the "prefer most recent" rule in the QA/refine prompts
-    # has something to anchor to even when chunks are shown out of order.
     date_filed_str = entry.date_filed.strftime("%Y-%m-%d")
     header = f"[Filed {date_filed_str} - {entry.title}]"
     doc = Document(
@@ -120,25 +114,23 @@ async def upsert_entry(entry: DocketEntry) -> None:
             "type": "docket_entry",
         },
     )
-    # Delete-then-insert for idempotent upserts: LlamaIndex has no atomic
-    # replace, so we purge stale nodes first to avoid duplicates.
-    await asyncio.to_thread(_index.delete_ref_doc, str(entry.id), delete_from_docstore=True)
     nodes = await _pipeline.arun(documents=[doc])
-    await asyncio.to_thread(_index.insert_nodes, nodes)
-    await asyncio.to_thread(_save)
+
+    def _apply() -> None:
+        """Purge any prior version of the entry, then insert and persist."""
+        _index.delete_ref_doc(str(entry.id), delete_from_docstore=True)
+        _index.insert_nodes(nodes)
+        _save()
+
+    async with sync_lock:
+        await asyncio.to_thread(_apply)
 
 
 async def delete_case_vectors(case_id: str) -> None:
-    """Remove all vector nodes belonging to a case from the index.
+    """Remove all vector nodes belonging to a case from the index."""
 
-    Iterates the docstore and deletes any ref-doc whose metadata
-    contains a matching case_id. The full-vector-store JSON dump can
-    take seconds, so all blocking work runs in a worker thread to keep
-    the event loop responsive (Discord/Slack heartbeats stay alive).
-    """
-
-    def _delete() -> bool:
-        """Synchronously purge matching ref-docs and persist if anything changed."""
+    def _delete() -> None:
+        """Find ref-docs tagged with case_id, delete them, and persist if any matched."""
         docstore = _index.storage_context.docstore
         all_ref_docs = docstore.get_all_ref_doc_info()
         ref_ids_to_delete = [
@@ -150,9 +142,9 @@ async def delete_case_vectors(case_id: str) -> None:
             _index.delete_ref_doc(ref_id, delete_from_docstore=True)
         if ref_ids_to_delete:
             _save()
-        return bool(ref_ids_to_delete)
 
-    await asyncio.to_thread(_delete)
+    async with sync_lock:
+        await asyncio.to_thread(_delete)
 
 
 async def upsert_document(
@@ -163,10 +155,9 @@ async def upsert_document(
 ) -> None:
     """Index all pages of a PDF document into the vector store.
 
-    Each page is run through the ingestion pipeline and keyed by
-    `<doc_model.id>_page_<n>` for idempotent upserts.
-
-    Requires the llama-index-readers-file package to be installed.
+    Each page is keyed by `<doc_model.id>_page_<n>` for idempotent upserts and
+    prefixed with the same `[Filed YYYY-MM-DD - title]` header as upsert_entry.
+    Requires the llama-index-readers-file package.
     """
     from llama_index.readers.file import PDFReader  # type: ignore[import-untyped]
 
@@ -177,33 +168,41 @@ async def upsert_document(
     date_filed_str = date_filed[:10]
     header = f"[Filed {date_filed_str} - {title}]" if (date_filed_str or title) else ""
 
-    def _purge_stale_pages() -> None:
-        """Assign per-page doc IDs and metadata, dropping any prior versions."""
-        for i, page in enumerate(pages):
-            doc_id = f"{doc_model.id}_page_{i}"
-            page.doc_id = doc_id
-            page.metadata.update(
-                {
-                    "docket_entry_id": str(doc_model.docket_entry_id),
-                    "pdf_url": doc_model.pdf_url,
-                    "date_filed": date_filed_str,
-                    "title": title,
-                    "type": "pdf_document",
-                }
-            )
-            if header:
-                page.set_content(f"{header}\n\n{page.get_content()}")
-            # Purge stale nodes before re-inserting (same pattern as upsert_entry).
-            _index.delete_ref_doc(doc_id, delete_from_docstore=True)
+    page_doc_ids: list[str] = []
+    for i, page in enumerate(pages):
+        doc_id = f"{doc_model.id}_page_{i}"
+        page.doc_id = doc_id
+        page_doc_ids.append(doc_id)
+        page.metadata.update(
+            {
+                "docket_entry_id": str(doc_model.docket_entry_id),
+                "pdf_url": doc_model.pdf_url,
+                "date_filed": date_filed_str,
+                "title": title,
+                "type": "pdf_document",
+            }
+        )
+        if header:
+            page.set_content(f"{header}\n\n{page.get_content()}")
 
-    await asyncio.to_thread(_purge_stale_pages)
     nodes = await _pipeline.arun(documents=pages)
-    await asyncio.to_thread(_index.insert_nodes, nodes)
-    await asyncio.to_thread(_save)
+
+    def _apply() -> None:
+        """Purge prior page versions, then insert and persist."""
+        for doc_id in page_doc_ids:
+            _index.delete_ref_doc(doc_id, delete_from_docstore=True)
+        _index.insert_nodes(nodes)
+        _save()
+
+    async with sync_lock:
+        await asyncio.to_thread(_apply)
 
 
 class SourceChunk(BaseModel):
     """A single retrieved chunk used to answer a question."""
+
+    # Tolerate unknown metadata keys so adding one in upsert_* doesn't break retrieval.
+    model_config = ConfigDict(extra="ignore")
 
     text: str
     score: float
@@ -226,18 +225,11 @@ class QueryResult(BaseModel):
 async def _build_retriever(case_id: str | None) -> BaseRetriever:
     """Build a hybrid (vector + BM25) retriever, optionally scoped to one case.
 
-    Vector retrieval handles semantic matches; BM25 handles exact-token matches
-    that embeddings often miss (party names, judge names, docket numbers, rule
-    citations). Results are fused with reciprocal rank fusion via
-    `QueryFusionRetriever`.
-
-    BM25 is rebuilt per query from the in-memory docstore. This is O(N) in
-    tokens but well under typical query latency for our corpus sizes; if the
-    docstore grows past tens of thousands of nodes we should cache the index.
-
-    Falls back to vector-only retrieval if the docstore is empty or the
-    case_id filter eliminates every node, since `BM25Retriever.from_defaults`
-    raises on an empty node list.
+    Vector retrieval handles semantic matches; BM25 catches exact-token matches
+    embeddings miss (party names, judges, docket numbers). Results are fused
+    with reciprocal rank fusion. Falls back to vector-only when the docstore
+    is empty or the case_id filter eliminates every node, since
+    `BM25Retriever.from_defaults` raises on an empty node list.
     """
     filters = None
     if case_id:
@@ -248,9 +240,7 @@ async def _build_retriever(case_id: str | None) -> BaseRetriever:
         similarity_top_k=settings.similarity_top_k,
     )
 
-    # Snapshot under the single-writer lock so we don't race a concurrent
-    # upsert mutating docstore.docs. The list copy is cheap; the rest of
-    # retriever construction is pure-Python and lock-free.
+    # Snapshot under the lock to avoid racing a concurrent upsert.
     async with sync_lock:
         nodes: list[BaseNode] = list(_index.docstore.docs.values())
     if case_id:
@@ -258,15 +248,13 @@ async def _build_retriever(case_id: str | None) -> BaseRetriever:
     if not nodes:
         return vector_retriever
 
-    # Clamp to len(nodes) so BM25Retriever doesn't log a noisy "overriding
-    # top_k" warning every time a case has fewer chunks than similarity_top_k.
+    # Clamp top_k to silence BM25's "overriding similarity_top_k" warning.
     bm25_retriever = BM25Retriever.from_defaults(
         nodes=nodes,
         similarity_top_k=min(settings.similarity_top_k, len(nodes)),
     )
 
-    # num_queries=1 disables LLM-based query rewriting; we only want pure
-    # hybrid fusion of the user's question across the two retrievers.
+    # num_queries=1 disables LLM-based query rewriting; we only want hybrid fusion.
     return QueryFusionRetriever(
         [vector_retriever, bm25_retriever],
         similarity_top_k=settings.similarity_top_k,

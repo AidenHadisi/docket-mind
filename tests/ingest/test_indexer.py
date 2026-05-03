@@ -145,6 +145,49 @@ async def test_build_retriever_uses_hybrid_when_nodes_exist(tmp_index, sample_en
     assert isinstance(retriever, QueryFusionRetriever)
 
 
+async def test_concurrent_writes_serialize_via_sync_lock(tmp_index, monkeypatch):
+    """Concurrent upsert_entry calls must serialise inside sync_lock."""
+    import asyncio
+    import time
+
+    import docketmind.index as ll
+
+    overlapping = 0
+    max_overlapping = 0
+    real_insert = ll._index.insert_nodes
+
+    def slow_insert(nodes):
+        """Sleep inside insert_nodes so concurrent calls expose the lock."""
+        nonlocal overlapping, max_overlapping
+        overlapping += 1
+        max_overlapping = max(max_overlapping, overlapping)
+        time.sleep(0.05)
+        overlapping -= 1
+        return real_insert(nodes)
+
+    monkeypatch.setattr(ll._index, "insert_nodes", slow_insert)
+
+    entries = []
+    for i in range(3):
+        e = DocketEntry(
+            case_id="case-001",
+            court_listener_id=f"cl-{i}",
+            title=f"Order {i}",
+            content=f"Body {i}",
+            content_hash=f"hash-{i}",
+            date_filed=datetime(2026, 4, 7, tzinfo=UTC),
+            embedded=False,
+        )
+        object.__setattr__(e, "id", f"entry-{i}")
+        entries.append(e)
+
+    await asyncio.gather(*(upsert_entry(e) for e in entries))
+
+    assert max_overlapping == 1, (
+        f"expected serialised index writes, observed {max_overlapping} concurrent"
+    )
+
+
 async def test_query_reranks_to_most_recent(tmp_index, monkeypatch):
     """FixedRecencyPostprocessor surfaces the most recent entry first."""
     from llama_index.core import Settings as LlamaConfig
