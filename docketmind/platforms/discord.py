@@ -75,6 +75,8 @@ class DiscordPlatform(Platform):
         resolves, send() pops the interaction and calls followup.send().
     """
 
+    name = "discord"
+
     def __init__(self) -> None:
         """Initialise the Discord client, command tree, and internal queues."""
         if not settings.discord_bot_token:
@@ -141,6 +143,7 @@ class DiscordPlatform(Platform):
                     args=kwargs,
                     channel_id=ch,
                     user_id=str(interaction.user.id),
+                    guild_id=str(interaction.guild_id) if interaction.guild_id else None,
                     permission_level=self._permission_level(interaction),
                     raw=interaction,
                 )

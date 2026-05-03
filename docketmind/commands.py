@@ -12,9 +12,19 @@ from sqlalchemy.exc import IntegrityError
 from docketmind import schedule, store
 from docketmind.chat import query
 from docketmind.configure import settings
+from docketmind.cooldown import CooldownError, CooldownScope
 from docketmind.index import delete_case_vectors
 from docketmind.ingest import fetch_case_metadata
 from docketmind.platforms import BotResponse, PermissionLevel, PlatformEvent
+
+__all__ = [
+    "COMMANDS",
+    "CommandHandler",
+    "CommandParam",
+    "CommandSpec",
+    "CooldownError",
+    "PermissionDeniedError",
+]
 
 type CommandHandler = Callable[[PlatformEvent], Awaitable[BotResponse]]
 
@@ -42,21 +52,13 @@ class CommandSpec:
     handler: CommandHandler
     params: list[CommandParam] = field(default_factory=list)
     cooldown: float = 0.0
+    cooldown_scope: CooldownScope = "guild"
     permission: PermissionLevel = PermissionLevel.USER
     ephemeral_defer: bool = False
 
 
 class PermissionDeniedError(Exception):
     """Raised when a command requires a higher permission level than the caller has."""
-
-
-class CooldownError(Exception):
-    """Raised when a command is invoked before its cooldown expires."""
-
-    def __init__(self, retry_after: float) -> None:
-        """Initialise with the number of seconds remaining on the cooldown."""
-        self.retry_after = retry_after
-        super().__init__(f"Command on cooldown. Retry after {retry_after:.1f}s.")
 
 
 # ---------------------------------------------------------------------------

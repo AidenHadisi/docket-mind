@@ -9,7 +9,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -41,6 +41,9 @@ class PlatformEvent(BaseModel):
     args: dict[str, Any]
     channel_id: str  # opaque string; platform-specific (e.g. "guild_id:channel_id")
     user_id: str
+    # Discord guild id / Slack team id; None for DMs or platforms without an
+    # equivalent grouping. Used by the cooldown tracker to scope buckets.
+    guild_id: str | None = None
     permission_level: PermissionLevel
     raw: Any = Field(default=None, exclude=True)
 
@@ -68,7 +71,13 @@ class Platform(ABC):
 
     Platforms are passive: they emit events and accept responses.
     All control flow lives in Bot.
+
+    Subclasses must set the class-level `name` attribute to a stable short
+    identifier (e.g. "discord", "slack"). Cooldown buckets, metrics, and
+    log lines key off this name.
     """
+
+    name: ClassVar[str]
 
     @abstractmethod
     def events(self) -> AsyncIterator[PlatformEvent]:

@@ -11,27 +11,12 @@ from __future__ import annotations
 
 import asyncio
 
-from cachetools import TTLCache
 from loguru import logger
 
-from docketmind.commands import COMMANDS, CommandSpec, CooldownError, PermissionDeniedError
+from docketmind.commands import COMMANDS, CommandSpec, PermissionDeniedError
+from docketmind.cooldown import CooldownError, tracker
 from docketmind.platforms import BotResponse, Platform, PlatformEvent, create_platforms
 from docketmind.schedule import start as ingest_start
-
-_cooldowns: dict[str, TTLCache[str, bool]] = {}
-
-
-def _check_cooldown(spec: CommandSpec, user_id: str) -> None:
-    """Raise CooldownError if the user is still on cooldown for this command."""
-    if spec.cooldown <= 0:
-        return
-    cache = _cooldowns.get(spec.name)
-    if cache is None:
-        cache = TTLCache(maxsize=4096, ttl=spec.cooldown)
-        _cooldowns[spec.name] = cache
-    if user_id in cache:
-        raise CooldownError(retry_after=spec.cooldown)
-    cache[user_id] = True
 
 
 async def dispatch(
@@ -55,7 +40,7 @@ async def dispatch(
     try:
         if spec.permission > event.permission_level:
             raise PermissionDeniedError
-        _check_cooldown(spec, event.user_id)
+        await tracker.hit(spec, event, platform.name)
         response = await spec.handler(event)
     except PermissionDeniedError:
         response = BotResponse(

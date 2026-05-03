@@ -63,6 +63,8 @@ class SlackPlatform(Platform):
         f"{team_id}:{channel_id}"
     """
 
+    name = "slack"
+
     def __init__(self) -> None:
         """Initialise the Slack Bolt app and socket mode handler."""
         if not settings.slack_bot_token or not settings.slack_app_token:
@@ -94,6 +96,7 @@ class SlackPlatform(Platform):
                     args=args,
                     channel_id=channel_id,
                     user_id=command["user_id"],
+                    guild_id=command.get("team_id"),
                     permission_level=self._permission_level(command),
                     raw=command,
                 )
