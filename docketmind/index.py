@@ -7,6 +7,7 @@ from typing import cast
 
 from llama_index.core import (
     Document,
+    Settings,
     StorageContext,
     VectorStoreIndex,
     load_index_from_storage,
@@ -64,7 +65,12 @@ def _build_index() -> VectorStoreIndex:
 
 
 def _build_pipeline() -> IngestionPipeline:
-    """Build the chunking-only ingestion pipeline.
+    """Build the chunk-then-embed ingestion pipeline.
+
+    Embedding inside the pipeline produces already-embedded nodes outside
+    the sync_lock, turning the subsequent `insert_nodes` into a fast
+    docstore write instead of a multi-second network call holding the
+    lock and starving concurrent queries.
 
     SummaryExtractor was tried but added an LLM call per chunk for no
     measurable retrieval benefit alongside BM25 + recency reranking.
@@ -75,6 +81,7 @@ def _build_pipeline() -> IngestionPipeline:
                 chunk_size=settings.chunk_size,
                 chunk_overlap=settings.chunk_overlap,
             ),
+            Settings.embed_model,
         ]
     )
 
