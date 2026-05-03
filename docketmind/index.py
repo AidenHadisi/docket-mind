@@ -88,6 +88,27 @@ def _save() -> None:
     _index.storage_context.persist(persist_dir=str(settings.index_path))
 
 
+def _heal_date_filed_metadata() -> None:
+    """Truncate any non-date-only `date_filed` metadata to YYYY-MM-DD.
+
+    Idempotent: nodes already carrying a 10-char date string are left alone.
+    Old nodes mixed tz-aware and tz-naive ISO strings, which crashed the
+    recency postprocessor's date parser.
+    """
+    changed = 0
+    for node in _index.docstore.docs.values():
+        raw = node.metadata.get("date_filed")
+        if isinstance(raw, str) and len(raw) > 10:
+            node.metadata["date_filed"] = raw[:10]
+            changed += 1
+    if changed:
+        _save()
+        logger.info("Healed date_filed metadata on {} vector node(s)", changed)
+
+
+_heal_date_filed_metadata()
+
+
 async def upsert_entry(entry: DocketEntry) -> None:
     """Index a docket entry's text into the vector store.
 
@@ -97,14 +118,15 @@ async def upsert_entry(entry: DocketEntry) -> None:
     # The "[Filed ...]" header gives the LLM in-band evidence of the entry
     # date and title so the "prefer most recent" rule in the QA/refine prompts
     # has something to anchor to even when chunks are shown out of order.
-    header = f"[Filed {entry.date_filed:%Y-%m-%d} - {entry.title}]"
+    date_filed_str = entry.date_filed.strftime("%Y-%m-%d")
+    header = f"[Filed {date_filed_str} - {entry.title}]"
     doc = Document(
         text=f"{header}\n\n{entry.title}\n\n{entry.content}",
         doc_id=str(entry.id),
         metadata={
             "case_id": str(entry.case_id),
             "court_listener_id": entry.court_listener_id,
-            "date_filed": entry.date_filed.isoformat(),
+            "date_filed": date_filed_str,
             "title": entry.title,
             "type": "docket_entry",
         },
@@ -162,10 +184,9 @@ async def upsert_document(
     reader = PDFReader()
     pages = await asyncio.to_thread(reader.load_data, file=pdf_path)
 
-    # Same in-band header rationale as upsert_entry: gives the LLM the parent
-    # entry's filing date and title on every PDF page, even if pages are shown
-    # out of order during refine.
-    header = f"[Filed {date_filed[:10]} - {title}]" if (date_filed or title) else ""
+    # Slice handles both full ISO ("2026-04-07T07:00:00+00:00") and bare date.
+    date_filed_str = date_filed[:10]
+    header = f"[Filed {date_filed_str} - {title}]" if (date_filed_str or title) else ""
 
     def _purge_stale_pages() -> None:
         """Assign per-page doc IDs and metadata, dropping any prior versions."""
@@ -176,7 +197,7 @@ async def upsert_document(
                 {
                     "docket_entry_id": str(doc_model.docket_entry_id),
                     "pdf_url": doc_model.pdf_url,
-                    "date_filed": date_filed,
+                    "date_filed": date_filed_str,
                     "title": title,
                     "type": "pdf_document",
                 }
