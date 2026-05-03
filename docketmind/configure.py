@@ -20,38 +20,32 @@ class Config(BaseConfig):
         extra="ignore",
     )
 
-    # Discord
     discord_bot_token: str = ""
     discord_guild_id: int | None = None  # set for instant guild sync in dev; None = global sync
 
-    # Slack (socket mode)
     slack_bot_token: str = ""  # xoxb-...
     slack_app_token: str = ""  # xapp-... (required for socket mode)
 
-    # LLM
     llm_provider: Literal["openai", "anthropic", "mock"] = "openai"
-    llm_model: str = "gpt-5.4"
+    llm_model: str = "gpt-5.4-mini"
     llm_api_key: str
-    llm_extra: dict[str, Any] = {}
+    # `reasoning_effort` is honoured by gpt-5.x reasoning models and ignored elsewhere.
+    # Override LLM_EXTRA when switching providers.
+    llm_extra: dict[str, Any] = Field(default_factory=lambda: {"reasoning_effort": "high"})
 
-    # Embeddings
     embed_provider: Literal["openai", "mock"] = "openai"
     embed_model: str = "text-embedding-3-small"
     embed_api_key: str
     embed_extra: dict[str, Any] = {}
 
-    # Storage — all persistent state lives under data_dir
     data_dir: Path = Path("data")
 
-    # RAG
     chunk_size: int = 1024
     chunk_overlap: int = 200
     similarity_top_k: int = 5
 
-    # RSS polling
-    poll_interval_seconds: int = Field(default=600, ge=60)  # minimum 60 seconds
+    poll_interval_seconds: int = Field(default=600, ge=60)
 
-    # Logging
     log_level: str = "INFO"
 
     @property
