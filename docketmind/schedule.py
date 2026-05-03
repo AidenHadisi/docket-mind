@@ -4,6 +4,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 
 import docketmind.store as store
+from docketmind import index
 from docketmind.configure import settings
 from docketmind.ingest import sync_case
 from docketmind.store import list_cases
@@ -12,13 +13,18 @@ _scheduler = AsyncIOScheduler()
 
 
 async def _run_sync(case_id: str) -> None:
-    """Run sync_case and log any unhandled errors."""
-    try:
-        result = await sync_case(case_id)
-        if result.errors:
-            logger.warning("Sync for case {} completed with errors: {}", case_id, result.errors)
-    except Exception as exc:
-        logger.error("Unhandled error syncing case {}: {}", case_id, exc)
+    """Run sync_case and log any unhandled errors.
+
+    Acquires `index.sync_lock` so concurrently-fired per-case jobs queue up
+    behind a single writer instead of racing on the in-memory docstore.
+    """
+    async with index.sync_lock:
+        try:
+            result = await sync_case(case_id)
+            if result.errors:
+                logger.warning("Sync for case {} completed with errors: {}", case_id, result.errors)
+        except Exception as exc:
+            logger.error("Unhandled error syncing case {}: {}", case_id, exc)
 
 
 def _register_job(case_id: str) -> None:
@@ -30,6 +36,8 @@ def _register_job(case_id: str) -> None:
         args=[case_id],
         id=f"sync_{case_id}",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
 
 

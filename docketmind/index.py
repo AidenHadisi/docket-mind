@@ -82,6 +82,13 @@ def _build_pipeline() -> IngestionPipeline:
 _index: VectorStoreIndex = _build_index()
 _pipeline: IngestionPipeline = _build_pipeline()
 
+# Single-writer mutex around every code path that mutates or iterates the
+# docstore. The underlying VectorStoreIndex is not thread-safe and we touch
+# it from `asyncio.to_thread` workers; without this lock, a writer thread
+# can mutate `docstore.docs` while another thread is iterating it during
+# persist, causing "dictionary changed size during iteration".
+sync_lock = asyncio.Lock()
+
 
 def _save() -> None:
     """Persist the index to disk."""
@@ -213,7 +220,7 @@ class QueryResult(BaseModel):
     sources: list[SourceChunk]
 
 
-def _build_retriever(case_id: str | None) -> BaseRetriever:
+async def _build_retriever(case_id: str | None) -> BaseRetriever:
     """Build a hybrid (vector + BM25) retriever, optionally scoped to one case.
 
     Vector retrieval handles semantic matches; BM25 handles exact-token matches
@@ -238,7 +245,11 @@ def _build_retriever(case_id: str | None) -> BaseRetriever:
         similarity_top_k=settings.similarity_top_k,
     )
 
-    nodes: list[BaseNode] = list(_index.docstore.docs.values())
+    # Snapshot under the single-writer lock so we don't race a concurrent
+    # upsert mutating docstore.docs. The list copy is cheap; the rest of
+    # retriever construction is pure-Python and lock-free.
+    async with sync_lock:
+        nodes: list[BaseNode] = list(_index.docstore.docs.values())
     if case_id:
         nodes = [n for n in nodes if n.metadata.get("case_id") == case_id]
     if not nodes:
@@ -268,7 +279,7 @@ async def query(question: str, case_id: str | None = None) -> QueryResult:
     to the LLM. If case_id is provided, only chunks from that case are
     considered.
     """
-    retriever = await asyncio.to_thread(_build_retriever, case_id)
+    retriever = await _build_retriever(case_id)
 
     engine = RetrieverQueryEngine.from_args(
         retriever,

@@ -122,13 +122,13 @@ async def test_upsert_entry_includes_filed_header(tmp_index, sample_entry: Docke
     )
 
 
-def test_build_retriever_falls_back_to_vector_when_empty(tmp_index):
+async def test_build_retriever_falls_back_to_vector_when_empty(tmp_index):
     """With no nodes indexed, hybrid retrieval can't build BM25; fall back."""
     from llama_index.core.retrievers import QueryFusionRetriever, VectorIndexRetriever
 
     from docketmind.index import _build_retriever
 
-    retriever = _build_retriever(case_id=None)
+    retriever = await _build_retriever(case_id=None)
     assert isinstance(retriever, VectorIndexRetriever)
     assert not isinstance(retriever, QueryFusionRetriever)
 
@@ -141,7 +141,7 @@ async def test_build_retriever_uses_hybrid_when_nodes_exist(tmp_index, sample_en
 
     await upsert_entry(sample_entry)
 
-    retriever = _build_retriever(case_id=None)
+    retriever = await _build_retriever(case_id=None)
     assert isinstance(retriever, QueryFusionRetriever)
 
 

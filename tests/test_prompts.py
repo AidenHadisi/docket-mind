@@ -82,7 +82,7 @@ async def test_query_passes_templates_to_engine(monkeypatch):
     fake_engine.aquery = AsyncMock(return_value=fake_response)
 
     fake_retriever = MagicMock()
-    monkeypatch.setattr(index, "_build_retriever", MagicMock(return_value=fake_retriever))
+    monkeypatch.setattr(index, "_build_retriever", AsyncMock(return_value=fake_retriever))
 
     from_args = MagicMock(return_value=fake_engine)
     monkeypatch.setattr(index.RetrieverQueryEngine, "from_args", from_args)
