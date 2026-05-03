@@ -12,7 +12,6 @@ from llama_index.core import (
     load_index_from_storage,
 )
 from llama_index.core.base.base_retriever import BaseRetriever
-from llama_index.core.extractors import SummaryExtractor
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.postprocessor import FixedRecencyPostprocessor
@@ -65,14 +64,18 @@ def _build_index() -> VectorStoreIndex:
 
 
 def _build_pipeline() -> IngestionPipeline:
-    """Build the ingestion pipeline with chunking and summary extraction."""
+    """Build the ingestion pipeline with chunking only.
+
+    Per-chunk summary extraction was tried (SummaryExtractor) but had no
+    measurable retrieval benefit alongside BM25 + recency reranking and
+    cost an LLM call per chunk on every ingest.
+    """
     return IngestionPipeline(
         transformations=[
             SentenceSplitter(
                 chunk_size=settings.chunk_size,
                 chunk_overlap=settings.chunk_overlap,
             ),
-            SummaryExtractor(summaries=["self"]),
         ]
     )
 
