@@ -255,9 +255,11 @@ async def _build_retriever(case_id: str | None) -> BaseRetriever:
     if not nodes:
         return vector_retriever
 
+    # Clamp to len(nodes) so BM25Retriever doesn't log a noisy "overriding
+    # top_k" warning every time a case has fewer chunks than similarity_top_k.
     bm25_retriever = BM25Retriever.from_defaults(
         nodes=nodes,
-        similarity_top_k=settings.similarity_top_k,
+        similarity_top_k=min(settings.similarity_top_k, len(nodes)),
     )
 
     # num_queries=1 disables LLM-based query rewriting; we only want pure
