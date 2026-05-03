@@ -254,6 +254,7 @@ async def sync_case(case_id: str) -> SyncResult:
                         doc,
                         Path(doc.pdf_path),
                         date_filed=doc.entry.date_filed.isoformat(),
+                        title=doc.entry.title,
                     )
                     doc.embedded = True
                 except Exception as exc:

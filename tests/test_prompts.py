@@ -70,7 +70,7 @@ def test_refine_template_preserves_persona():
 
 
 async def test_query_passes_templates_to_engine(monkeypatch):
-    """index.query must forward our templates to as_query_engine so the
+    """index.query must forward our templates to RetrieverQueryEngine so the
     default LlamaIndex prompts never reach the LLM in production."""
     from docketmind import index
 
@@ -81,14 +81,16 @@ async def test_query_passes_templates_to_engine(monkeypatch):
     fake_engine = MagicMock()
     fake_engine.aquery = AsyncMock(return_value=fake_response)
 
-    fake_index = MagicMock()
-    fake_index.as_query_engine = MagicMock(return_value=fake_engine)
-    monkeypatch.setattr(index, "_index", fake_index)
+    fake_retriever = MagicMock()
+    monkeypatch.setattr(index, "_build_retriever", MagicMock(return_value=fake_retriever))
+
+    from_args = MagicMock(return_value=fake_engine)
+    monkeypatch.setattr(index.RetrieverQueryEngine, "from_args", from_args)
 
     result = await index.query("any question")
 
-    fake_index.as_query_engine.assert_called_once()
-    kwargs = fake_index.as_query_engine.call_args.kwargs
+    from_args.assert_called_once()
+    kwargs = from_args.call_args.kwargs
     assert kwargs["text_qa_template"] is DOCKET_QA_TEMPLATE
     assert kwargs["refine_template"] is DOCKET_REFINE_TEMPLATE
     assert result.answer == "stubbed answer"

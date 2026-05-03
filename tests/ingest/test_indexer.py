@@ -108,3 +108,80 @@ async def test_upsert_document_is_idempotent(
 
     doc_count = len(tmp_index.docstore.docs)
     assert doc_count == 1, f"Expected 1 doc after idempotent upsert, got {doc_count}"
+
+
+async def test_upsert_entry_includes_filed_header(tmp_index, sample_entry: DocketEntry):
+    """The synthetic [Filed YYYY-MM-DD - title] header is embedded in node text."""
+    await upsert_entry(sample_entry)
+
+    nodes = list(tmp_index.docstore.docs.values())
+    assert nodes, "expected at least one node after upsert"
+    expected_header = "[Filed 2026-04-07 - Order on Motion to Dismiss]"
+    assert any(node.text.startswith(expected_header) for node in nodes), (
+        f"no node started with {expected_header!r}; got: {[n.text[:80] for n in nodes]}"
+    )
+
+
+def test_build_retriever_falls_back_to_vector_when_empty(tmp_index):
+    """With no nodes indexed, hybrid retrieval can't build BM25; fall back."""
+    from llama_index.core.retrievers import QueryFusionRetriever, VectorIndexRetriever
+
+    from docketmind.index import _build_retriever
+
+    retriever = _build_retriever(case_id=None)
+    assert isinstance(retriever, VectorIndexRetriever)
+    assert not isinstance(retriever, QueryFusionRetriever)
+
+
+async def test_build_retriever_uses_hybrid_when_nodes_exist(tmp_index, sample_entry: DocketEntry):
+    """With nodes in the docstore, _build_retriever returns a fusion retriever."""
+    from llama_index.core.retrievers import QueryFusionRetriever
+
+    from docketmind.index import _build_retriever, upsert_entry
+
+    await upsert_entry(sample_entry)
+
+    retriever = _build_retriever(case_id=None)
+    assert isinstance(retriever, QueryFusionRetriever)
+
+
+async def test_query_reranks_to_most_recent(tmp_index, monkeypatch):
+    """FixedRecencyPostprocessor surfaces the most recent entry first."""
+    from llama_index.core import Settings as LlamaConfig
+    from llama_index.core.llms.mock import MockLLM
+
+    from docketmind.index import query
+
+    monkeypatch.setattr(LlamaConfig, "llm", MockLLM())
+
+    older = DocketEntry(
+        case_id="case-001",
+        court_listener_id="cl-old",
+        title="Order Setting Initial Conference",
+        content="Court schedules an initial case management conference.",
+        content_hash="hash-old",
+        date_filed=datetime(2026, 1, 1, tzinfo=UTC),
+        embedded=False,
+    )
+    object.__setattr__(older, "id", "entry-old")
+    newer = DocketEntry(
+        case_id="case-001",
+        court_listener_id="cl-new",
+        title="Order on Motion to Dismiss",
+        content="Court grants defendant's motion to dismiss for lack of jurisdiction.",
+        content_hash="hash-new",
+        date_filed=datetime(2026, 4, 7, tzinfo=UTC),
+        embedded=False,
+    )
+    object.__setattr__(newer, "id", "entry-new")
+
+    await upsert_entry(older)
+    await upsert_entry(newer)
+
+    result = await query("what is the latest", case_id="case-001")
+
+    assert result.sources, "expected at least one source chunk"
+    top = result.sources[0]
+    assert top.date_filed is not None and top.date_filed.startswith("2026-04-07"), (
+        f"expected top source to be the 2026-04-07 entry, got {top.date_filed!r}"
+    )

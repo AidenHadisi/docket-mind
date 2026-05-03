@@ -24,6 +24,7 @@ dependencies = [
     "cachetools>=5.3",
     "slack-bolt>=1.28.0",
     "limits>=5.8.0",
+    "llama-index-retrievers-bm25>=0.7.1",
 ]
 
 [dependency-groups]

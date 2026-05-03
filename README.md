@@ -115,7 +115,8 @@ You need credentials for **at least one platform** (Discord or Slack), plus LLM 
 | `DATA_DIR` | `data` | Root directory for the SQLite database, vector index, and downloaded PDFs |
 | `CHUNK_SIZE` | `1024` | Token chunk size for document splitting |
 | `CHUNK_OVERLAP` | `200` | Overlap between chunks |
-| `SIMILARITY_TOP_K` | `5` | Number of chunks retrieved per query |
+| `SIMILARITY_TOP_K` | `30` | Number of chunks retrieved by vector search per query (wide candidate pool for postprocessors to filter) |
+| `SYNTHESIS_TOP_K` | `8` | Number of chunks that survive postprocessing and are sent to the LLM for synthesis |
 | `POLL_INTERVAL_SECONDS` | `600` | RSS poll interval in seconds (minimum 60) |
 | `LOG_LEVEL` | `INFO` | Logging level |
 

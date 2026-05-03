@@ -42,7 +42,12 @@ class Config(BaseConfig):
 
     chunk_size: int = 1024
     chunk_overlap: int = 200
-    similarity_top_k: int = 5
+    # Retrieve a wide candidate set so postprocessors (recency rerank, future
+    # similarity cutoff, future LLM rerank) have material to filter down from.
+    similarity_top_k: int = 30
+    # Number of nodes that survive postprocessing and are sent to the LLM for
+    # synthesis. Keep small: synthesis cost scales linearly with this.
+    synthesis_top_k: int = 8
 
     poll_interval_seconds: int = Field(default=600, ge=60)
 

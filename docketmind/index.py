@@ -11,10 +11,17 @@ from llama_index.core import (
     VectorStoreIndex,
     load_index_from_storage,
 )
+from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.extractors import SummaryExtractor
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.postprocessor import FixedRecencyPostprocessor
+from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.retrievers import QueryFusionRetriever
+from llama_index.core.retrievers.fusion_retriever import FUSION_MODES
+from llama_index.core.schema import BaseNode
 from llama_index.core.vector_stores.types import MetadataFilter, MetadataFilters
+from llama_index.retrievers.bm25 import BM25Retriever
 from loguru import logger
 from pydantic import BaseModel
 
@@ -87,8 +94,12 @@ async def upsert_entry(entry: DocketEntry) -> None:
     Runs the entry through the ingestion pipeline (chunking + summary extraction)
     before inserting. Uses entry.id as the document ID for idempotent upserts.
     """
+    # The "[Filed ...]" header gives the LLM in-band evidence of the entry
+    # date and title so the "prefer most recent" rule in the QA/refine prompts
+    # has something to anchor to even when chunks are shown out of order.
+    header = f"[Filed {entry.date_filed:%Y-%m-%d} - {entry.title}]"
     doc = Document(
-        text=f"{entry.title}\n\n{entry.content}",
+        text=f"{header}\n\n{entry.title}\n\n{entry.content}",
         doc_id=str(entry.id),
         metadata={
             "case_id": str(entry.case_id),
@@ -137,6 +148,7 @@ async def upsert_document(
     doc_model: DocketEntryDocument,
     pdf_path: Path,
     date_filed: str = "",
+    title: str = "",
 ) -> None:
     """Index all pages of a PDF document into the vector store.
 
@@ -150,6 +162,11 @@ async def upsert_document(
     reader = PDFReader()
     pages = await asyncio.to_thread(reader.load_data, file=pdf_path)
 
+    # Same in-band header rationale as upsert_entry: gives the LLM the parent
+    # entry's filing date and title on every PDF page, even if pages are shown
+    # out of order during refine.
+    header = f"[Filed {date_filed[:10]} - {title}]" if (date_filed or title) else ""
+
     def _purge_stale_pages() -> None:
         """Assign per-page doc IDs and metadata, dropping any prior versions."""
         for i, page in enumerate(pages):
@@ -160,9 +177,12 @@ async def upsert_document(
                     "docket_entry_id": str(doc_model.docket_entry_id),
                     "pdf_url": doc_model.pdf_url,
                     "date_filed": date_filed,
+                    "title": title,
                     "type": "pdf_document",
                 }
             )
+            if header:
+                page.set_content(f"{header}\n\n{page.get_content()}")
             # Purge stale nodes before re-inserting (same pattern as upsert_entry).
             _index.delete_ref_doc(doc_id, delete_from_docstore=True)
 
@@ -193,19 +213,71 @@ class QueryResult(BaseModel):
     sources: list[SourceChunk]
 
 
-async def query(question: str, case_id: str | None = None) -> QueryResult:
-    """Answer a question using the vector index, optionally scoped to one case.
+def _build_retriever(case_id: str | None) -> BaseRetriever:
+    """Build a hybrid (vector + BM25) retriever, optionally scoped to one case.
 
-    Retrieves the most relevant chunks and passes them to the LLM.
-    If case_id is provided, only chunks from that case are considered.
+    Vector retrieval handles semantic matches; BM25 handles exact-token matches
+    that embeddings often miss (party names, judge names, docket numbers, rule
+    citations). Results are fused with reciprocal rank fusion via
+    `QueryFusionRetriever`.
+
+    BM25 is rebuilt per query from the in-memory docstore. This is O(N) in
+    tokens but well under typical query latency for our corpus sizes; if the
+    docstore grows past tens of thousands of nodes we should cache the index.
+
+    Falls back to vector-only retrieval if the docstore is empty or the
+    case_id filter eliminates every node, since `BM25Retriever.from_defaults`
+    raises on an empty node list.
     """
     filters = None
     if case_id:
         filters = MetadataFilters(filters=[MetadataFilter(key="case_id", value=case_id)])
 
-    engine = _index.as_query_engine(
+    vector_retriever = _index.as_retriever(
         filters=filters,
         similarity_top_k=settings.similarity_top_k,
+    )
+
+    nodes: list[BaseNode] = list(_index.docstore.docs.values())
+    if case_id:
+        nodes = [n for n in nodes if n.metadata.get("case_id") == case_id]
+    if not nodes:
+        return vector_retriever
+
+    bm25_retriever = BM25Retriever.from_defaults(
+        nodes=nodes,
+        similarity_top_k=settings.similarity_top_k,
+    )
+
+    # num_queries=1 disables LLM-based query rewriting; we only want pure
+    # hybrid fusion of the user's question across the two retrievers.
+    return QueryFusionRetriever(
+        [vector_retriever, bm25_retriever],
+        similarity_top_k=settings.similarity_top_k,
+        num_queries=1,
+        mode=FUSION_MODES.RECIPROCAL_RANK,
+        use_async=True,
+    )
+
+
+async def query(question: str, case_id: str | None = None) -> QueryResult:
+    """Answer a question using hybrid retrieval, optionally scoped to one case.
+
+    Retrieves candidate chunks from both vector search and BM25, fuses them
+    with reciprocal rank fusion, reranks by recency, and passes the survivors
+    to the LLM. If case_id is provided, only chunks from that case are
+    considered.
+    """
+    retriever = await asyncio.to_thread(_build_retriever, case_id)
+
+    engine = RetrieverQueryEngine.from_args(
+        retriever,
+        node_postprocessors=[
+            FixedRecencyPostprocessor(
+                date_key="date_filed",
+                top_k=settings.synthesis_top_k,
+            ),
+        ],
         text_qa_template=DOCKET_QA_TEMPLATE,
         refine_template=DOCKET_REFINE_TEMPLATE,
     )

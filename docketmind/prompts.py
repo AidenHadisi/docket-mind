@@ -69,7 +69,7 @@ DOCKET_QA_TEMPLATE = ChatPromptTemplate(
 )
 
 
-_REFINE_SYSTEM = """You are DocketMind. You are refining an existing answer with additional excerpts from U.S. federal court filings. Apply the same rules as before: use only the excerpts, no personal advice or predictions, no invented details, refer to documents by name and date in prose, and keep a neutral factual tone."""
+_REFINE_SYSTEM = """You are DocketMind. You are refining an existing answer with additional excerpts from U.S. federal court filings. Apply the same rules as before: use only the excerpts, no personal advice or predictions, no invented details, refer to documents by name and date in prose, and keep a neutral factual tone. If the new excerpts conflict with the current answer, prefer the most recent filing (by the date in each excerpt's "[Filed YYYY-MM-DD ...]" header) and note the conflict."""
 
 
 _REFINE_USER = """Original question:
