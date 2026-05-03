@@ -9,11 +9,9 @@ from typing import NamedTuple
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
-from docketmind import schedule, store
-from docketmind.chat import query
+from docketmind import index, schedule, store
 from docketmind.configure import settings
 from docketmind.cooldown import CooldownError, CooldownScope
-from docketmind.index import delete_case_vectors
 from docketmind.ingest import fetch_case_metadata
 from docketmind.platforms import BotResponse, PermissionLevel, PlatformEvent
 
@@ -65,7 +63,7 @@ async def ask(event: PlatformEvent) -> BotResponse:
     """Answer a question using RAG, optionally scoped to a case."""
     question: str = event.args["question"]
     case_id: str | None = event.args.get("case_id")
-    result = await query(question, case_id=case_id)
+    result = await index.query(question, case_id=case_id)
     return BotResponse(text=result.answer, citations=result.sources, question=question)
 
 
@@ -131,7 +129,7 @@ async def remove_case(event: PlatformEvent) -> BotResponse:
         await session.commit()
 
     schedule.remove_case(case_id)
-    await delete_case_vectors(case_id)
+    await index.delete_case_vectors(case_id)
 
     pdf_dir = settings.pdfs_path / court_listener_id
     if pdf_dir.is_dir():

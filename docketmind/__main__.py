@@ -13,8 +13,9 @@ import asyncio
 
 from loguru import logger
 
+from docketmind import cooldown
 from docketmind.commands import COMMANDS, CommandSpec, PermissionDeniedError
-from docketmind.cooldown import CooldownError, tracker
+from docketmind.cooldown import CooldownError
 from docketmind.platforms import BotResponse, Platform, PlatformEvent, create_platforms
 from docketmind.schedule import start as ingest_start
 
@@ -40,7 +41,7 @@ async def dispatch(
     try:
         if spec.permission > event.permission_level:
             raise PermissionDeniedError
-        await tracker.hit(spec, event, platform.name)
+        await cooldown.hit(spec, event, platform.name)
         response = await spec.handler(event)
     except PermissionDeniedError:
         response = BotResponse(

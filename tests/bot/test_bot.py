@@ -6,9 +6,9 @@ from collections.abc import AsyncIterator
 
 import pytest
 
+from docketmind import cooldown
 from docketmind.__main__ import _run_platform, dispatch
 from docketmind.commands import CommandSpec
-from docketmind.cooldown import tracker
 from docketmind.platforms import BotResponse, PermissionLevel, Platform, PlatformEvent
 
 
@@ -62,15 +62,11 @@ class DummyPlatform(Platform):
 
 
 @pytest.fixture(autouse=True)
-async def _reset_cooldown_tracker():
-    """Wipe the module-level cooldown tracker around each test.
-
-    `reset()` mutates storage in place, so the singleton stays valid for
-    callers that imported `tracker` directly.
-    """
-    await tracker.reset()
+async def _reset_cooldown_state():
+    """Wipe module-level cooldown state around each test for isolation."""
+    await cooldown.reset()
     yield
-    await tracker.reset()
+    await cooldown.reset()
 
 
 async def test_dispatch_routes_to_registered_handler():

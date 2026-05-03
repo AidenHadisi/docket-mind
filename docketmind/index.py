@@ -1,4 +1,4 @@
-"""Vector store index singletons and upsert operations."""
+"""Vector store: ingest upserts and RAG query, sharing a single private index."""
 
 import asyncio
 import shutil
@@ -14,9 +14,12 @@ from llama_index.core import (
 from llama_index.core.extractors import SummaryExtractor
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.vector_stores.types import MetadataFilter, MetadataFilters
 from loguru import logger
+from pydantic import BaseModel
 
 from docketmind.configure import settings
+from docketmind.prompts import DOCKET_QA_TEMPLATE, DOCKET_REFINE_TEMPLATE
 from docketmind.store import DocketEntry, DocketEntryDocument
 
 
@@ -67,13 +70,15 @@ def _build_pipeline() -> IngestionPipeline:
     )
 
 
-index: VectorStoreIndex = _build_index()
-pipeline: IngestionPipeline = _build_pipeline()
+# Private singletons: callers go through the module-level functions below
+# rather than reaching into the index/pipeline objects directly.
+_index: VectorStoreIndex = _build_index()
+_pipeline: IngestionPipeline = _build_pipeline()
 
 
 def _save() -> None:
     """Persist the index to disk."""
-    index.storage_context.persist(persist_dir=str(settings.index_path))
+    _index.storage_context.persist(persist_dir=str(settings.index_path))
 
 
 async def upsert_entry(entry: DocketEntry) -> None:
@@ -95,9 +100,9 @@ async def upsert_entry(entry: DocketEntry) -> None:
     )
     # Delete-then-insert for idempotent upserts: LlamaIndex has no atomic
     # replace, so we purge stale nodes first to avoid duplicates.
-    await asyncio.to_thread(index.delete_ref_doc, str(entry.id), delete_from_docstore=True)
-    nodes = await pipeline.arun(documents=[doc])
-    await asyncio.to_thread(index.insert_nodes, nodes)
+    await asyncio.to_thread(_index.delete_ref_doc, str(entry.id), delete_from_docstore=True)
+    nodes = await _pipeline.arun(documents=[doc])
+    await asyncio.to_thread(_index.insert_nodes, nodes)
     await asyncio.to_thread(_save)
 
 
@@ -111,7 +116,8 @@ async def delete_case_vectors(case_id: str) -> None:
     """
 
     def _delete() -> bool:
-        docstore = index.storage_context.docstore
+        """Synchronously purge matching ref-docs and persist if anything changed."""
+        docstore = _index.storage_context.docstore
         all_ref_docs = docstore.get_all_ref_doc_info()
         ref_ids_to_delete = [
             ref_id
@@ -119,7 +125,7 @@ async def delete_case_vectors(case_id: str) -> None:
             if doc_info.metadata.get("case_id") == case_id
         ]
         for ref_id in ref_ids_to_delete:
-            index.delete_ref_doc(ref_id, delete_from_docstore=True)
+            _index.delete_ref_doc(ref_id, delete_from_docstore=True)
         if ref_ids_to_delete:
             _save()
         return bool(ref_ids_to_delete)
@@ -145,6 +151,7 @@ async def upsert_document(
     pages = await asyncio.to_thread(reader.load_data, file=pdf_path)
 
     def _purge_stale_pages() -> None:
+        """Assign per-page doc IDs and metadata, dropping any prior versions."""
         for i, page in enumerate(pages):
             doc_id = f"{doc_model.id}_page_{i}"
             page.doc_id = doc_id
@@ -156,10 +163,61 @@ async def upsert_document(
                     "type": "pdf_document",
                 }
             )
-            # Purge stale nodes before re-inserting (same pattern as upsert_entry)
-            index.delete_ref_doc(doc_id, delete_from_docstore=True)
+            # Purge stale nodes before re-inserting (same pattern as upsert_entry).
+            _index.delete_ref_doc(doc_id, delete_from_docstore=True)
 
     await asyncio.to_thread(_purge_stale_pages)
-    nodes = await pipeline.arun(documents=pages)
-    await asyncio.to_thread(index.insert_nodes, nodes)
+    nodes = await _pipeline.arun(documents=pages)
+    await asyncio.to_thread(_index.insert_nodes, nodes)
     await asyncio.to_thread(_save)
+
+
+class SourceChunk(BaseModel):
+    """A single retrieved chunk used to answer a question."""
+
+    text: str
+    score: float
+    type: str
+    case_id: str | None = None
+    court_listener_id: str | None = None
+    date_filed: str | None = None
+    title: str | None = None
+    docket_entry_id: str | None = None
+    pdf_url: str | None = None
+
+
+class QueryResult(BaseModel):
+    """The result of a RAG query, including the answer and its source chunks."""
+
+    answer: str
+    sources: list[SourceChunk]
+
+
+async def query(question: str, case_id: str | None = None) -> QueryResult:
+    """Answer a question using the vector index, optionally scoped to one case.
+
+    Retrieves the most relevant chunks and passes them to the LLM.
+    If case_id is provided, only chunks from that case are considered.
+    """
+    filters = None
+    if case_id:
+        filters = MetadataFilters(filters=[MetadataFilter(key="case_id", value=case_id)])
+
+    engine = _index.as_query_engine(
+        filters=filters,
+        similarity_top_k=settings.similarity_top_k,
+        text_qa_template=DOCKET_QA_TEMPLATE,
+        refine_template=DOCKET_REFINE_TEMPLATE,
+    )
+    response = await engine.aquery(question)
+
+    sources = [
+        SourceChunk(
+            text=node.text,
+            score=node.score or 0.0,
+            **node.metadata,
+        )
+        for node in response.source_nodes
+    ]
+
+    return QueryResult(answer=str(response), sources=sources)

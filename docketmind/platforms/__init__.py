@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from docketmind.chat import SourceChunk
+from docketmind.index import SourceChunk
 
 if TYPE_CHECKING:
     from docketmind.commands import CommandSpec

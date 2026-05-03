@@ -1,11 +1,11 @@
 """Per-command cooldown enforcement built on the `limits` library.
 
-The dispatch loop calls `CooldownTracker.hit()` before invoking a command's
-handler. A successful call records an attempt in the underlying rate limiter;
-a denied call raises `CooldownError` with the exact remaining time.
+The dispatch loop calls `hit()` before invoking a command's handler.
+A successful call records an attempt in the underlying rate limiter; a
+denied call raises `CooldownError` with the exact remaining time.
 
 Storage today is `MemoryStorage`. Swapping in `RedisStorage("redis://...")`
-to share state across processes is a one-line change in `__init__`.
+to share state across processes is a one-line change to `_storage`.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from docketmind.platforms import PlatformEvent
 
 
-CooldownScope = Literal["user", "channel", "guild", "global"]
+type CooldownScope = Literal["user", "channel", "guild", "global"]
 
 
 class CooldownError(Exception):
@@ -74,54 +74,36 @@ def _rate_for(spec: CommandSpec) -> RateLimitItemPerSecond:
     return RateLimitItemPerSecond(1, seconds)
 
 
-class CooldownTracker:
-    """Enforces per-command, scope-aware cooldowns using a `limits` rate limiter.
+# Module-private state. Swap `_storage` to `RedisStorage("redis://...")` to
+# share cooldowns across processes; nothing else needs to change.
+_storage: MemoryStorage = MemoryStorage()
+_limiter: MovingWindowRateLimiter = MovingWindowRateLimiter(_storage)
 
-    Construct one per process and inject it into `dispatch`. The default
-    `MemoryStorage` keeps state in the current process; swap to a
-    `RedisStorage` instance to share cooldowns across instances.
+
+async def hit(
+    spec: CommandSpec,
+    event: PlatformEvent,
+    platform_name: str,
+) -> None:
+    """Record an attempt; raise `CooldownError` if the user is still cooling down.
 
     Cooldowns are armed on attempt (the limiter increments before the handler
     runs), so a handler that raises still consumes the user's window. This
-    matches the previous behaviour and prevents tight retry loops against a
-    flaky backend.
+    prevents tight retry loops against a flaky backend.
+
+    No-ops for commands with `spec.cooldown <= 0`.
     """
-
-    def __init__(self, storage: MemoryStorage | None = None) -> None:
-        """Initialise the underlying moving-window limiter and storage."""
-        self._storage = storage or MemoryStorage()
-        self._limiter = MovingWindowRateLimiter(self._storage)
-
-    async def hit(
-        self,
-        spec: CommandSpec,
-        event: PlatformEvent,
-        platform_name: str,
-    ) -> None:
-        """Record an attempt; raise `CooldownError` if the user is still cooling down.
-
-        No-ops for commands with `spec.cooldown <= 0`.
-        """
-        if spec.cooldown <= 0:
-            return
-        item = _rate_for(spec)
-        identifiers = _scope_identifiers(spec, event, platform_name)
-        if await self._limiter.hit(item, *identifiers):
-            return
-        stats = await self._limiter.get_window_stats(item, *identifiers)
-        retry_after = max(0.0, stats.reset_time - time.time())
-        raise CooldownError(retry_after=retry_after)
-
-    async def reset(self) -> None:
-        """Wipe all cooldown state in place. Primarily for test isolation.
-
-        Mutates the underlying storage rather than replacing it, so callers
-        that hold a direct reference to `tracker` (e.g. via
-        `from docketmind.cooldown import tracker`) keep seeing the cleared
-        state without any rebinding.
-        """
-        await self._storage.reset()
+    if spec.cooldown <= 0:
+        return
+    item = _rate_for(spec)
+    identifiers = _scope_identifiers(spec, event, platform_name)
+    if await _limiter.hit(item, *identifiers):
+        return
+    stats = await _limiter.get_window_stats(item, *identifiers)
+    retry_after = max(0.0, stats.reset_time - time.time())
+    raise CooldownError(retry_after=retry_after)
 
 
-# Module-level singleton, matching the pattern used for `engine` and `index`.
-tracker: CooldownTracker = CooldownTracker()
+async def reset() -> None:
+    """Wipe all cooldown state. Primarily for test isolation."""
+    await _storage.reset()

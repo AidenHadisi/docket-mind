@@ -10,9 +10,9 @@ from loguru import logger
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
-from docketmind.chat import SourceChunk
 from docketmind.commands import CommandSpec
 from docketmind.configure import settings
+from docketmind.index import SourceChunk
 from docketmind.platforms import (
     BotResponse,
     PermissionLevel,

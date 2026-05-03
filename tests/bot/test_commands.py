@@ -31,13 +31,14 @@ def _event(
 
 
 async def test_ask_calls_query_when_no_case_id(monkeypatch):
-    import docketmind.commands as cmd_module
+    """ask() must forward the question to index.query with case_id=None."""
+    from docketmind import index
 
     mock_result = MagicMock()
     mock_result.answer = "The answer."
     mock_result.sources = []
     mock_query = AsyncMock(return_value=mock_result)
-    monkeypatch.setattr(cmd_module, "query", mock_query)
+    monkeypatch.setattr(index, "query", mock_query)
 
     response = await ask(_event(args={"question": "What happened?", "case_id": None}))
 
@@ -47,13 +48,14 @@ async def test_ask_calls_query_when_no_case_id(monkeypatch):
 
 
 async def test_ask_passes_case_id_to_query(monkeypatch):
-    import docketmind.commands as cmd_module
+    """ask() must forward an explicit case_id through to index.query."""
+    from docketmind import index
 
     mock_result = MagicMock()
     mock_result.answer = "Scoped answer."
     mock_result.sources = []
     mock_query = AsyncMock(return_value=mock_result)
-    monkeypatch.setattr(cmd_module, "query", mock_query)
+    monkeypatch.setattr(index, "query", mock_query)
 
     response = await ask(_event(args={"question": "Any updates?", "case_id": "case-abc"}))
 

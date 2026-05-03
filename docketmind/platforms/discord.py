@@ -11,9 +11,9 @@ from discord import app_commands
 from discord.ext import commands as ext_commands
 from loguru import logger
 
-from docketmind.chat import SourceChunk
 from docketmind.commands import CommandSpec
 from docketmind.configure import settings
+from docketmind.index import SourceChunk
 from docketmind.platforms import (
     BotResponse,
     PermissionLevel,

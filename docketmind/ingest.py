@@ -12,9 +12,9 @@ import stamina
 from loguru import logger
 from pydantic import BaseModel, Field, computed_field
 
+from docketmind import index
 from docketmind import store as db
 from docketmind.configure import settings
-from docketmind.index import upsert_document, upsert_entry
 from docketmind.store import (
     DocketEntry,
     DocketEntryDocument,
@@ -241,7 +241,7 @@ async def sync_case(case_id: str) -> SyncResult:
 
         for entry in await list_unembedded_entries(session, case_id):
             try:
-                await upsert_entry(entry)
+                await index.upsert_entry(entry)
                 entry.embedded = True
             except Exception as exc:
                 result.errors.append(f"Embed failed for entry {entry.id}: {exc}")
@@ -250,7 +250,7 @@ async def sync_case(case_id: str) -> SyncResult:
         for doc in await list_unembedded_documents(session, case_id):
             if doc.pdf_path:
                 try:
-                    await upsert_document(
+                    await index.upsert_document(
                         doc,
                         Path(doc.pdf_path),
                         date_filed=doc.entry.date_filed.isoformat(),

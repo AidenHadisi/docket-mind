@@ -70,9 +70,9 @@ def test_refine_template_preserves_persona():
 
 
 async def test_query_passes_templates_to_engine(monkeypatch):
-    """chat.query must forward our templates to as_query_engine so the
+    """index.query must forward our templates to as_query_engine so the
     default LlamaIndex prompts never reach the LLM in production."""
-    from docketmind import chat
+    from docketmind import index
 
     fake_response = MagicMock()
     fake_response.source_nodes = []
@@ -83,9 +83,9 @@ async def test_query_passes_templates_to_engine(monkeypatch):
 
     fake_index = MagicMock()
     fake_index.as_query_engine = MagicMock(return_value=fake_engine)
-    monkeypatch.setattr(chat, "index", fake_index)
+    monkeypatch.setattr(index, "_index", fake_index)
 
-    result = await chat.query("any question")
+    result = await index.query("any question")
 
     fake_index.as_query_engine.assert_called_once()
     kwargs = fake_index.as_query_engine.call_args.kwargs

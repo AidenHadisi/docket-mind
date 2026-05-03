@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from docketmind.chat import SourceChunk
 from docketmind.commands import CommandParam, CommandSpec
+from docketmind.index import SourceChunk
 from docketmind.platforms import BotResponse, PermissionLevel, PlatformNotConfigured
 from docketmind.platforms.slack import SlackPlatform, _truncate
 

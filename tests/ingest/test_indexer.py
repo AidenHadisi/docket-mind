@@ -31,12 +31,12 @@ def tmp_index(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(cfg.settings, "data_dir", tmp_path)
     fresh = _build_index()
-    monkeypatch.setattr(ll, "index", fresh)
+    monkeypatch.setattr(ll, "_index", fresh)
     # Replace the production pipeline (which has SummaryExtractor) with a
     # lightweight one so tests don't make LLM calls.
     monkeypatch.setattr(
         ll,
-        "pipeline",
+        "_pipeline",
         IngestionPipeline(transformations=[SentenceSplitter()]),
     )
     return fresh

@@ -56,7 +56,7 @@ def pipeline_mocks(mocker):
     """Patch all external pipeline dependencies and return the mocks."""
     return {
         "fetch_feed": mocker.patch("docketmind.ingest.fetch_feed"),
-        "upsert_entry": mocker.patch("docketmind.ingest.upsert_entry"),
+        "upsert_entry": mocker.patch("docketmind.ingest.index.upsert_entry"),
     }
 
 
