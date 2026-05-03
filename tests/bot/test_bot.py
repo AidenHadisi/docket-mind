@@ -63,11 +63,10 @@ class DummyPlatform(Platform):
 
 @pytest.fixture(autouse=True)
 async def _reset_cooldown_tracker():
-    """Wipe the module-level cooldown tracker before and after each test.
+    """Wipe the module-level cooldown tracker around each test.
 
-    `CooldownTracker.reset()` mutates the underlying storage in place, so
-    every test starts with an empty rate-limit window without anyone having
-    to rebind the singleton.
+    `reset()` mutates storage in place, so the singleton stays valid for
+    callers that imported `tracker` directly.
     """
     await tracker.reset()
     yield
@@ -345,10 +344,9 @@ async def test_cooldown_retry_after_is_accurate():
     match = re.search(r"in ([\d.]+)s", msg)
     assert match, f"expected a retry-in-Xs message, got: {msg!r}"
     retry_after = float(match.group(1))
-    # Strictly less than the full window: proves the bug-fix where retry_after
-    # was previously hard-coded to spec.cooldown.
+    # Must be strictly less than the full window — guards against a regression
+    # to the old behaviour of reporting `spec.cooldown` verbatim.
     assert retry_after < 10.0
-    # And not absurdly small either — we slept ~0.2s, so ~9.8s should remain.
     assert retry_after > 8.0
 
 
@@ -370,8 +368,7 @@ async def test_cooldown_arms_even_when_handler_raises():
     assert len(platform.sent) == 2
     assert "internal error" in platform.sent[0][1].text.lower()
     assert "Slow down" in platform.sent[1][1].text
-    # The second dispatch must short-circuit at the cooldown check, never
-    # reaching the handler again.
+    # Second dispatch must short-circuit at the cooldown check.
     assert call_count == 1
 
 

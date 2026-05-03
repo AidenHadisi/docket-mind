@@ -113,12 +113,10 @@ class SlackPlatform(Platform):
     def _permission_level(command: dict[str, Any]) -> PermissionLevel:
         """Map Slack command context to a PermissionLevel.
 
-        Checks if the user is a workspace admin/owner via the command payload.
-        Falls back to USER if not determinable from the slash command payload.
+        Slash command payloads don't carry admin status, so we conservatively
+        return USER. Extend via `users.info` or a configured admin allowlist
+        if admin-only commands are needed on Slack.
         """
-        # Slack doesn't include admin status in slash command payloads by default.
-        # For now, we treat all users as USER. Admin checks can be extended via
-        # the users.info API call or a configured admin user list.
         return PermissionLevel.USER
 
     @staticmethod
@@ -138,10 +136,6 @@ class SlackPlatform(Platform):
             else:
                 args[param.name] = ""
         return args
-
-    # ------------------------------------------------------------------
-    # Platform interface
-    # ------------------------------------------------------------------
 
     async def events(self) -> AsyncIterator[PlatformEvent]:  # type: ignore[override]
         """Yield events from the internal queue as Slack commands arrive."""
@@ -193,10 +187,6 @@ class SlackPlatform(Platform):
                 )
             else:
                 await self._app.client.chat_postMessage(channel=channel, text=text)
-
-    # ------------------------------------------------------------------
-    # Response rendering (Block Kit)
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _source_label(src: SourceChunk) -> str:

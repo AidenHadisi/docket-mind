@@ -121,10 +121,6 @@ class DiscordPlatform(Platform):
                 logger.info("Discord adapter ready (global sync)")
             self._ready.set()
 
-    # ------------------------------------------------------------------
-    # CommandSpec -> slash command auto-wiring
-    # ------------------------------------------------------------------
-
     def register_commands(self, specs: list[CommandSpec]) -> None:
         """Build a Discord slash command for each CommandSpec and add it to the tree."""
         for spec in specs:
@@ -182,10 +178,6 @@ class DiscordPlatform(Platform):
             )
         )
 
-    # ------------------------------------------------------------------
-    # Platform interface
-    # ------------------------------------------------------------------
-
     async def events(self) -> AsyncIterator[PlatformEvent]:  # type: ignore[override]
         """Yield events from the internal queue as Discord interactions arrive.
 
@@ -195,10 +187,6 @@ class DiscordPlatform(Platform):
         await self._ready.wait()
         while True:
             yield await self._event_queue.get()
-
-    # ------------------------------------------------------------------
-    # Response rendering
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _source_label(src: SourceChunk) -> str:
@@ -241,10 +229,6 @@ class DiscordPlatform(Platform):
     def _format_plain(response: BotResponse) -> str:
         """Render a BotResponse as plain Discord markdown (non-embed fallback)."""
         return _truncate(response.text, _DISCORD_MAX_LENGTH)
-
-    # ------------------------------------------------------------------
-    # Platform interface
-    # ------------------------------------------------------------------
 
     async def send(self, channel_id: str, response: BotResponse) -> None:
         """Send a BotResponse as a Discord followup message.

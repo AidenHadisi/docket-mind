@@ -61,11 +61,6 @@ class PermissionDeniedError(Exception):
     """Raised when a command requires a higher permission level than the caller has."""
 
 
-# ---------------------------------------------------------------------------
-# Handlers
-# ---------------------------------------------------------------------------
-
-
 async def ask(event: PlatformEvent) -> BotResponse:
     """Answer a question using RAG, optionally scoped to a case."""
     question: str = event.args["question"]
@@ -168,10 +163,6 @@ async def list_cases(event: PlatformEvent) -> BotResponse:
     ]
     return BotResponse(text="**Tracked Cases:**\n" + "\n".join(lines))
 
-
-# ---------------------------------------------------------------------------
-# Command registry
-# ---------------------------------------------------------------------------
 
 COMMANDS: list[CommandSpec] = [
     CommandSpec(

@@ -103,7 +103,7 @@ async def fetch_feed(rss_url: str) -> list[RawEntry]:
         content = str(item.get("summary") or "")
 
         if item.get("published_parsed"):
-            # feedparser returns a time.struct_time; unpack the first 6 fields (Y-M-D-H-M-S)
+            # feedparser returns a time.struct_time; first 6 fields are Y-M-D-H-M-S.
             date_filed = datetime(*item.published_parsed[:6], tzinfo=UTC)  # type: ignore[misc]
         else:
             logger.warning(
@@ -172,7 +172,6 @@ async def sync_case(case_id: str) -> SyncResult:
             result.errors.append(f"Case {case_id} not found in database")
             return result
 
-        # Step 1: Fetch full RSS feed
         try:
             raw_entries = await fetch_feed(case.rss_url)
         except Exception as exc:
@@ -180,9 +179,8 @@ async def sync_case(case_id: str) -> SyncResult:
             logger.error("RSS fetch failed for case {}: {}", case_id, exc)
             return result
 
-        # Step 2: Reconcile entries and documents
         existing_entries = await list_entries_for_case(session, case_id)
-        # Index by CourtListener ID for O(1) dedup lookups against the feed
+        # Index by CourtListener ID for O(1) dedup against the feed.
         existing_by_cl_id = {e.court_listener_id: e for e in existing_entries}
 
         for raw in raw_entries:
@@ -199,11 +197,11 @@ async def sync_case(case_id: str) -> SyncResult:
                     embedded=False,
                 )
                 session.add(entry)
-                # Flush to assign entry.id so we can link documents below
+                # Flush to assign entry.id so we can link documents below.
                 await session.flush()
                 result.new_entries += 1
             elif existing.content_hash != raw.content_hash:
-                # Content changed since last sync — mark for re-embedding
+                # Content changed since last sync; mark for re-embedding.
                 existing.title = raw.title
                 existing.content = raw.content
                 existing.content_hash = raw.content_hash
@@ -224,9 +222,8 @@ async def sync_case(case_id: str) -> SyncResult:
 
         await session.commit()
 
-        # Step 3: Download pending PDFs
-        # PDFs are stored under court_listener_id (not the internal UUID) so
-        # files persist as a cache across remove/re-add cycles.
+        # PDFs are keyed by court_listener_id (not the internal UUID) so the
+        # on-disk cache survives remove/re-add cycles.
         for doc in await list_pending_downloads(session, case_id):
             filename = doc.pdf_url.rstrip("/").split("/")[-1]
             dest = settings.pdfs_path / case.court_listener_id / filename
@@ -242,7 +239,6 @@ async def sync_case(case_id: str) -> SyncResult:
 
         await session.commit()
 
-        # Step 4: Embed unembedded entries
         for entry in await list_unembedded_entries(session, case_id):
             try:
                 await upsert_entry(entry)
@@ -251,7 +247,6 @@ async def sync_case(case_id: str) -> SyncResult:
                 result.errors.append(f"Embed failed for entry {entry.id}: {exc}")
                 logger.error("Embed failed for entry {}: {}", entry.id, exc)
 
-        # Step 5: Embed downloaded PDFs
         for doc in await list_unembedded_documents(session, case_id):
             if doc.pdf_path:
                 try:

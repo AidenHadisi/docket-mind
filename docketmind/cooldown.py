@@ -59,8 +59,7 @@ def _scope_identifiers(
         return (cmd, platform_name, event.user_id)
     if scope == "channel":
         return (cmd, platform_name, event.channel_id, event.user_id)
-    # "guild" (default): DMs have no guild, so fall back to the literal "dm"
-    # so DMs from the same user still share a bucket per-command.
+    # "guild" (default): DMs have no guild, so coalesce to a literal "dm" bucket.
     return (cmd, platform_name, event.guild_id or "dm", event.user_id)
 
 
@@ -124,8 +123,5 @@ class CooldownTracker:
         await self._storage.reset()
 
 
-# Module-level singleton, mirroring the pattern used for `engine` in store.py
-# and `index` in index.py. The instance itself is mutable in place via
-# `tracker.reset()`, so tests can wipe state without rebinding the symbol;
-# see the autouse fixture in tests/bot/test_bot.py.
+# Module-level singleton, matching the pattern used for `engine` and `index`.
 tracker: CooldownTracker = CooldownTracker()

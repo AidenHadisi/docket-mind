@@ -61,14 +61,11 @@ class Case(Base):
 
     __tablename__ = "cases"
 
-    # Required init fields
     court_listener_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     name: Mapped[str] = mapped_column(String)
 
-    # Optional init fields
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
 
-    # Auto-managed — excluded from __init__
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, init=False, default_factory=lambda: str(uuid.uuid4())
     )
@@ -101,7 +98,6 @@ class DocketEntry(Base):
         UniqueConstraint("case_id", "court_listener_id", name="uq_docket_entry_case_cl_id"),
     )
 
-    # Required init fields
     case_id: Mapped[str] = mapped_column(String(36), ForeignKey("cases.id"), index=True)
     court_listener_id: Mapped[str] = mapped_column(String, index=True)
     title: Mapped[str] = mapped_column(String)
@@ -109,10 +105,8 @@ class DocketEntry(Base):
     content_hash: Mapped[str] = mapped_column(String(64))
     date_filed: Mapped[datetime] = mapped_column(DateTime)
 
-    # Optional init fields
     embedded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
-    # Auto-managed — excluded from __init__
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, init=False, default_factory=lambda: str(uuid.uuid4())
     )
@@ -146,18 +140,15 @@ class DocketEntryDocument(Base):
     __tablename__ = "docket_entry_documents"
     __table_args__ = (UniqueConstraint("docket_entry_id", "pdf_url", name="uq_doc_entry_url"),)
 
-    # Required init fields
     docket_entry_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("docket_entries.id"), index=True
     )
     pdf_url: Mapped[str] = mapped_column(String)
 
-    # Optional init fields
     pdf_path: Mapped[str | None] = mapped_column(String, default=None)
     downloaded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     embedded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
-    # Auto-managed — excluded from __init__
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, init=False, default_factory=lambda: str(uuid.uuid4())
     )

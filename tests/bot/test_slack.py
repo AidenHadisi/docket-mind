@@ -9,10 +9,6 @@ from docketmind.commands import CommandParam, CommandSpec
 from docketmind.platforms import BotResponse, PermissionLevel, PlatformNotConfigured
 from docketmind.platforms.slack import SlackPlatform, _truncate
 
-# ------------------------------------------------------------------
-# PlatformNotConfigured guard
-# ------------------------------------------------------------------
-
 
 def test_raises_not_configured_when_tokens_missing(monkeypatch):
     """SlackPlatform raises PlatformNotConfigured if tokens are absent."""
@@ -28,11 +24,6 @@ def test_raises_not_configured_when_app_token_missing(monkeypatch):
     monkeypatch.setattr("docketmind.platforms.slack.settings.slack_app_token", "")
     with pytest.raises(PlatformNotConfigured):
         SlackPlatform()
-
-
-# ------------------------------------------------------------------
-# _parse_args
-# ------------------------------------------------------------------
 
 
 def test_parse_args_splits_text_positionally():
@@ -80,11 +71,6 @@ def test_parse_args_empty_text():
     assert args == {"question": "", "case_id": None}
 
 
-# ------------------------------------------------------------------
-# _channel_id / _permission_level
-# ------------------------------------------------------------------
-
-
 def test_channel_id_encoding():
     """channel_id combines team and channel."""
     cmd = {"team_id": "T123", "channel_id": "C456"}
@@ -95,11 +81,6 @@ def test_permission_level_defaults_to_user():
     """Without admin info, permission defaults to USER."""
     cmd = {"user_id": "U1"}
     assert SlackPlatform._permission_level(cmd) == PermissionLevel.USER
-
-
-# ------------------------------------------------------------------
-# _source_label
-# ------------------------------------------------------------------
 
 
 def test_source_label_pdf_url():
@@ -133,11 +114,6 @@ def test_source_label_plain_title():
     )
     label = SlackPlatform._source_label(src)
     assert label == "Some Entry"
-
-
-# ------------------------------------------------------------------
-# _build_blocks
-# ------------------------------------------------------------------
 
 
 def test_build_blocks_includes_header_and_section():
@@ -180,11 +156,6 @@ def test_build_blocks_no_question_skips_header():
     assert all(b["type"] != "header" for b in blocks)
 
 
-# ------------------------------------------------------------------
-# _truncate helper
-# ------------------------------------------------------------------
-
-
 def test_truncate_short_text_unchanged():
     """Short text passes through."""
     assert _truncate("hello", 100) == "hello"
@@ -196,11 +167,6 @@ def test_truncate_long_text_adds_ellipsis():
     result = _truncate(text, 30)
     assert len(result) <= 30
     assert result.endswith("...")
-
-
-# ------------------------------------------------------------------
-# send (integration-style with mocked webhook)
-# ------------------------------------------------------------------
 
 
 @patch("docketmind.platforms.slack.settings")
