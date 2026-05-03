@@ -88,27 +88,6 @@ def _save() -> None:
     _index.storage_context.persist(persist_dir=str(settings.index_path))
 
 
-def _heal_date_filed_metadata() -> None:
-    """Truncate any non-date-only `date_filed` metadata to YYYY-MM-DD.
-
-    Idempotent: nodes already carrying a 10-char date string are left alone.
-    Old nodes mixed tz-aware and tz-naive ISO strings, which crashed the
-    recency postprocessor's date parser.
-    """
-    changed = 0
-    for node in _index.docstore.docs.values():
-        raw = node.metadata.get("date_filed")
-        if isinstance(raw, str) and len(raw) > 10:
-            node.metadata["date_filed"] = raw[:10]
-            changed += 1
-    if changed:
-        _save()
-        logger.info("Healed date_filed metadata on {} vector node(s)", changed)
-
-
-_heal_date_filed_metadata()
-
-
 async def upsert_entry(entry: DocketEntry) -> None:
     """Index a docket entry's text into the vector store.
 
